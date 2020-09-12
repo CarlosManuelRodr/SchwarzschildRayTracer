@@ -56,7 +56,6 @@ Temporary Items
 *.sdf
 *.psd
 *.log
-*.pdf
 *.aux
 *.synctex.gz
 **/.vs/
