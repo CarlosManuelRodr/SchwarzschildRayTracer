@@ -4,17 +4,25 @@
 class Material;
 class Hittable;
 
+/**
+ * @struct HitRecord
+ * @brief Estructura que guarda los parámetros de una colisión.
+ */
 struct HitRecord
 {
-    Vector3 p;          // Position where collision occurs
-    Vector3 normal;     // Normal of the collided surface
-    Material* matPtr;   // Pointer to material of the collided object
-    Hittable* object;   // Pointer to the collided object
-    float t;            // Parameter where collision ocurred
-    float u;            // Texture U coordinate of the collision
-    float v;            // Texture V coordinate of the collision
+    Vector3 p;          // Posición donde ocurre la colisión
+    Vector3 normal;     // Vector normal de la superficie colisionada
+    Material* matPtr;   // Puntero hacia el material del objecto colisionado
+    Hittable* object;   // Puntero hacia el objeto colisionado
+    float t;            // Parámetro donde ocurrió la colisión
+    float u;            // Coordenada de textura U de la colisión
+    float v;            // Coordenada de textura V de la colisión
 };
 
+/**
+ * @class Hitable
+ * @brief Clase abstracta que representa un objeto colisionable.
+ */
 class Hitable
 {
 public:

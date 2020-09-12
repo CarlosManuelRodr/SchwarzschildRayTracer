@@ -9,6 +9,9 @@
 #include "RandomGen.h"
 #include "Material.h"
 #include "ThreadPool.h"
+#include "RayTracer.h"
+#include "Filesystem.h"
+#include "ProgressBar.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_STATIC
@@ -16,32 +19,15 @@
 
 using namespace std;
 
-Vector3 color_from_ray(const Ray& r, HitableList world, int depth)
-{
-    HitRecord rec;
-    if (world.Hit(r, 0.001f, FLT_MAX, rec))
-    {
-        Ray scattered;
-        Vector3 attenuation;
-        Vector3 emitted = rec.matPtr->Emitted(rec.u, rec.v, rec.p);
-
-        if (depth < 50 && rec.matPtr->Scatter(r, rec, attenuation, scattered))
-        {
-            return emitted + attenuation * color_from_ray(scattered, world, depth + 1);
-        }
-        else
-        {
-            return unit_vector(emitted);
-        }
-    }
-    else
-    {
-        Vector3 unitDirection = unit_vector(r.Direction());
-        float t = 0.5f * (unitDirection.y() + 1.0f);
-        return (1.0f - t) * Vector3(1.0f, 1.0f, 1.0f) + t * Vector3(0.5f, 0.7f, 1.0f);
-    }
-}
-
+/**
+* @brief Dibuja una fila de la imagen a construir.
+* @param j Fila a dibujar
+* @param nx Tamaño horizontal de la imagen
+* @param ny Tamaño vertical de la imagen
+* @param ns Rayos por pixel
+* @param world Lista con todos los elementos del mundo
+* @param camera Cámara desde la cual se emiten los rayos
+*/
 vector<sf::Color> render_world_line(int j, int nx, int ny, int ns, const HitableList& world, const Camera& camera)
 {
     vector<sf::Color> output;
@@ -53,7 +39,7 @@ vector<sf::Color> render_world_line(int j, int nx, int ny, int ns, const Hitable
             float u = float(i + RandomGen::Getfloat()) / float(nx);
             float v = float(j + RandomGen::Getfloat()) / float(ny);
             Ray r = camera.GetRay(u, v);
-            rayColor += color_from_ray(r, world, 0);
+            rayColor += ray_trace(r, world);
         }
         rayColor /= float(ns);
         rayColor = Vector3(sqrt(rayColor[0]), sqrt(rayColor[1]), sqrt(rayColor[2]));
@@ -66,6 +52,10 @@ vector<sf::Color> render_world_line(int j, int nx, int ny, int ns, const Hitable
     return output;
 }
 
+/**
+* @brief Convierte una matriz de valores RGB a imagen de SFML.
+* @param imageAsBitmap Matriz que contiene colores de los pixeles.
+*/
 sf::Image bitmap_to_image(vector< vector<sf::Color> > imageAsBitmap)
 {
     int ny = (int) imageAsBitmap.size();
@@ -85,6 +75,14 @@ sf::Image bitmap_to_image(vector< vector<sf::Color> > imageAsBitmap)
     return output;
 }
 
+/**
+* @brief Dibuja la imagen. Versión multi-thread.
+* @param nx Tamaño horizontal de la imagen
+* @param ny Tamaño vertical de la imagen
+* @param ns Rayos por pixel
+* @param world Lista con todos los elementos del mundo
+* @param camera Cámara desde la cual se emiten los rayos
+*/
 sf::Image render_world_mt(int nx, int ny, int ns, const HitableList& world, const Camera& camera)
 {
     unsigned int hc = thread::hardware_concurrency();
@@ -97,11 +95,23 @@ sf::Image render_world_mt(int nx, int ny, int ns, const HitableList& world, cons
         result.push_back(pool.enqueue(render_world_line, j, nx, ny, ns, world, camera));
 
     for (auto& r : result)
+    {
+        progress_bar((float)(&r - &result[0]), 0.0f, (float) result.size(), 1.0f);
         imageAsBitmap.push_back(r.get());
+    }
+    progress_bar(1, 0, 1, 1);
 
     return bitmap_to_image(imageAsBitmap);
 }
 
+/**
+* @brief Dibuja la imagen. Versión single-thread. Se usa en el modo (debug).
+* @param nx Tamaño horizontal de la imagen
+* @param ny Tamaño vertical de la imagen
+* @param ns Rayos por pixel
+* @param world Lista con todos los elementos del mundo
+* @param camera Cámara desde la cual se emiten los rayos
+*/
 sf::Image render_world_st(int nx, int ny, int ns, const HitableList& world, const Camera& camera)
 {
     vector<vector<sf::Color>> imageAsBitmap;
@@ -118,15 +128,15 @@ int main()
     RandomGen::Seed();
     int nx = 800;
     int ny = 600;
-    int ns = 50;
+    int ns = 30;
 
-    // Load textures
+    // Carga las texturas
     int earthTextWidth, earthTextHeight, earthTextChannels;
     unsigned char *earthTexture = stbi_load("Textures\\earthmap.jpg", &earthTextWidth, &earthTextHeight, &earthTextChannels, 0);
     int skyTextWidth, skyTextHeight, skyTextChannels;
     unsigned char* skyTexture = stbi_load("Textures\\starbackground.jpg", &skyTextWidth, &skyTextHeight, &skyTextChannels, 0);
 
-    // Set-up world
+    // Inicializa el mundo
     vector<Hitable*> hitableList;
     hitableList.push_back(
         new Sphere(
@@ -143,7 +153,7 @@ int main()
     hitableList.push_back(
         new Sphere(
             Vector3(0.0f, 0.0f, -1.0f), 5.5f,
-            new Schwarzschild(0.01f)
+            new Schwarzschild(0.05f)
         )
     );
     hitableList.push_back(
@@ -154,14 +164,19 @@ int main()
     );
     HitableList world(hitableList);
 
-    // Camera set-up
+    // Configuración de la cámara
     Vector3 cameraPosition(4.0f, 7.0f, 3.0f);
     Vector3 cameraLookAt(4.0f, 0.0f, -1.0f);
     Camera camera = Camera(cameraPosition, cameraLookAt, Vector3(0.0f, 1.0f, 0.0f), 90.0f, (float) nx / (float) ny);
 
-    // Initialize window
-    sf::RenderWindow window(sf::VideoMode(nx, ny), "Ray Tracer");
+    // Prepara el directorio de salida
+    create_directory("Output");
 
+    // Inicializa la ventana SFML
+    sf::RenderWindow window(sf::VideoMode(nx, ny), "Ray Tracer");
+    window.setFramerateLimit(10);
+
+    // Inicializa las texturas donde se dibujará la imagen.
     sf::Texture texture;
     texture.create(nx, ny);
     sf::Sprite sprite;
@@ -173,7 +188,11 @@ int main()
     texture.update(render_world_mt(nx, ny, ns, world, camera));
 #endif
 
-    const float movementDelta = 0.1f;
+    // Guarda el primer render.
+    texture.copyToImage().saveToFile(filename_join({ "Output", "img0.png" }));
+
+    int renders = 1;
+    const float movementDelta = 0.05f;
     while (window.isOpen())
     {
         sf::Event event;
@@ -183,7 +202,7 @@ int main()
                 window.close();
             if (event.type == sf::Event::KeyPressed)
             {
-                // Directional keys
+                // Teclas direccionales
                 if (event.key.code == sf::Keyboard::Right)
                 {
                     cameraPosition += Vector3(movementDelta, 0.0f, 0.0f);
@@ -233,6 +252,10 @@ int main()
             #else
                 texture.update(render_world_mt(nx, ny, ns, world, camera));
             #endif
+
+                // Guarda la imagen
+                texture.copyToImage().saveToFile(filename_join({ "Output", "img" + to_string(renders) + ".png" }));
+                renders++;
             }
         }
 

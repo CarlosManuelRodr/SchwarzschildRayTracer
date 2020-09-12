@@ -1,6 +1,10 @@
 #pragma once
 #include "Vector3.h"
 
+/**
+ * @class Ray
+ * @brief Rayo de luz que inicia en posición A y tiene dirección B.
+ */
 class Ray
 {
 public:

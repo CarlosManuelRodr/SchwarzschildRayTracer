@@ -2,6 +2,12 @@
 #include "Hitable.h"
 #include "Texture.h"
 
+/***************************************
+*                                      *
+*  Operaciones vectoriales auxiliares  *
+*                                      *
+****************************************/
+
 Vector3 reflect(const Vector3& v, const Vector3& n)
 {
     return v - 2.0f * dot(v, n) * n;
@@ -15,6 +21,16 @@ Vector3 refract(const Vector3& uv, const Vector3& n, float etai_over_etat)
     return r_out_perp + r_out_parallel;
 }
 
+/****************************
+*                           *
+*         Materiales        *
+*                           *
+****************************/
+
+/**
+ * @class Material
+ * @brief Clase abstracta que representa un objeto colisionable.
+ */
 class Material
 {
 public:
@@ -25,6 +41,10 @@ public:
     }
 };
 
+/**
+ * @class Lambertian
+ * @brief Material opaco.
+ */
 class Lambertian : public Material
 {
 public:
@@ -41,6 +61,10 @@ public:
     }
 };
 
+/**
+ * @class Metal
+ * @brief Material metálico.
+ */
 class Metal : public Material
 {
 public:
@@ -69,6 +93,10 @@ public:
     }
 };
 
+/**
+ * @class Dielectric
+ * @brief Material translúcido.
+ */
 class Dielectric : public Material
 {
 public:
@@ -142,6 +170,10 @@ public:
     }
 };
 
+/**
+ * @class DiffuseLight
+ * @brief Material emisor de luz.
+ */
 class DiffuseLight : public Material
 {
 public:
@@ -158,6 +190,10 @@ public:
     }
 };
 
+/**
+ * @class Schwarzschild
+ * @brief Material que simula la desviación de un rayo debido a la presencia de un cuerpo masivo.
+ */
 class Schwarzschild : public Material
 {
 public:

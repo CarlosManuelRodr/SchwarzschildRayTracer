@@ -1,18 +1,29 @@
 #pragma once
 #include "Vector3.h"
 
+/**
+ * @class Texture
+ * @brief Clase abstracta que representa una textura.
+ */
 class Texture
 {
 public:
+    ///@brief Devuelve el color de la textura en el punto de colisión.
+    ///@param u coordenada U de la textura
+    ///@param v Coordenada V de la textura
+    ///@param p Posición de la colisión
     virtual Vector3 Value(float u, float v, const Vector3& p) const = 0;
 };
 
+/**
+ * @class ConstantTexture
+ * @brief Textura de color simple.
+ */
 class ConstantTexture : public Texture
 {
 public:
     Vector3 color;
 
-    ConstantTexture() {}
     ConstantTexture(Vector3 textureColor) : color(textureColor) {}
 
     virtual Vector3 Value(float u, float v, const Vector3& p) const
@@ -21,13 +32,16 @@ public:
     }
 };
 
+/**
+ * @class CheckerTexture
+ * @brief Textura de patrón reticular.
+ */
 class CheckerTexture : public Texture
 {
 public:
     Texture* odd;
     Texture* even;
 
-    CheckerTexture() {}
     CheckerTexture(Texture* t0, Texture* t1) : even(t0), odd(t1) {}
 
     virtual Vector3 Value(float u, float v, const Vector3& p) const
@@ -40,13 +54,16 @@ public:
     }
 };
 
+/**
+ * @class ImageTexture
+ * @brief Textura a partir de imagen.
+ */
 class ImageTexture : public Texture
 {
 public:
     int nx, ny;
     unsigned char* data;
 
-    ImageTexture() {}
     ImageTexture(unsigned char* pixels, int A, int B) : data(pixels), nx(A), ny(B) {}
 
     virtual Vector3 Value(float u, float v, const Vector3& p) const

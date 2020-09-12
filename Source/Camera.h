@@ -1,6 +1,11 @@
 #pragma once
 #include "Ray.h"
 
+/**
+ * @class Camera
+ * @brief Cámara con posición y dirección configurables.
+ * La cámara se encarga de producir los rayos que se simularán por cada píxel.
+ */
 class Camera
 {
 private:

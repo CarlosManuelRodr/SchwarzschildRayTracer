@@ -7,6 +7,10 @@ using std::sqrt;
 
 const float pi = 3.1415926535f;
 
+/**
+ * @class Vector3
+ * @brief Implementación de vector de 3 coordenadas.
+ */
 class Vector3
 {
 public:
@@ -56,12 +60,11 @@ public:
 };
 
 
-// Type aliases for vec3
-using Point3 = Vector3;   // 3D point
-using Color = Vector3;    // RGB color
-
-
-// Vector3 Utility Functions
+/*******************************
+*                              *
+*  Operaciones entre vectores  *
+*                              *
+*******************************/
 
 inline std::ostream& operator<<(std::ostream& out, const Vector3& v)
 {
@@ -97,6 +100,12 @@ inline Vector3 operator/(Vector3 v, float t)
 {
     return (1 / t) * v;
 }
+
+/**********************************
+*                                 *
+*  Operaciones de álgebra lineal  *
+*                                 *
+**********************************/
 
 inline float dot(const Vector3& u, const Vector3& v)
 {
