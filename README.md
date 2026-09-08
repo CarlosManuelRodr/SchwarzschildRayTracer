@@ -20,13 +20,30 @@ Se puede encontrar información adicional en el siguiente artículo:
 *Orbits of massless particles in the Schwarzschild metric: Exact solutions American Journal of Physics 82, 564 (2014)*
 
 ## Compilación
-### Windows
-La solución se encuentra en el directorio MSVC. No es necesario instalar dependencias adicionales.
 
-### Linux
-Compilar manualmente los archivos
+El proyecto usa CMake y [vcpkg](https://vcpkg.io/) en Windows y Linux. El
+manifiesto `vcpkg.json` instala automáticamente SFML 2.6.2 durante la
+configuración.
 
-- gui_main.cpp
-- RandomGen.cpp
+Requisitos:
 
-Añadiendo SFML como dependencia de compilación y vinculación.
+- CMake 3.21 o posterior
+- Un compilador compatible con C++11
+- vcpkg, con la variable de entorno `VCPKG_ROOT` apuntando a su directorio
+
+```sh
+cmake --preset default
+cmake --build --preset default
+```
+
+El ejecutable se genera en `build/` (o en `build/Release/` con generadores
+multiconfiguración). CMake copia las texturas necesarias junto al ejecutable.
+
+Sin presets, se puede configurar explícitamente el toolchain:
+
+```sh
+cmake -S . -B build \
+  -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+```

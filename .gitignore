@@ -61,3 +61,10 @@ Temporary Items
 **/.vs/
 **/x64/
 **/Debug/
+
+# CMake and vcpkg build output
+/build/
+/out/
+/vcpkg_installed/
+/CMakeUserPresets.json
+.idea/
