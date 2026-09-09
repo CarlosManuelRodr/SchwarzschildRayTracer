@@ -58,7 +58,7 @@ sf::ContextSettings contextSettings()
     return sf::ContextSettings(0, 0, 0, 4, 3, sf::ContextSettings::Core);
 }
 
-void benchmark(const std::filesystem::path& assets, rt::RenderSettings settings)
+void benchmark(const std::filesystem::path& assets, rt::RenderSettings settings, bool compareCpu = true)
 {
     sf::Context context(contextSettings(), 1, 1);
     auto scene = rt::defaultScene(assets);
@@ -96,8 +96,14 @@ void benchmark(const std::filesystem::path& assets, rt::RenderSettings settings)
               << " s\nGPU completion including readback: " << gpuSeconds
               << " s\nLongest GPU batch: " << gpu.progress().maxBatchMilliseconds
               << " ms\nGPU invalid rays: " << gpu.progress().failures << std::endl;
-    rt::savePng(
-        executableDirectory() / "Output" / "benchmark-gpu.png", settings.width, settings.height, image);
+    rt::savePng(executableDirectory() / "Output" / (compareCpu ? "benchmark-gpu.png" : "render-gpu.png"),
+                settings.width,
+                settings.height,
+                image,
+                settings.exposure);
+
+    if (!compareCpu)
+        return;
     start = Clock::now();
     std::uint64_t failures = 0;
     auto cpu = rt::renderCpu(scene, settings, camera, &failures);
@@ -110,7 +116,11 @@ void benchmark(const std::filesystem::path& assets, rt::RenderSettings settings)
         squared += x * x + y * y + z * z;
     }
 
-    rt::savePng(executableDirectory() / "Output" / "benchmark-cpu.png", settings.width, settings.height, cpu);
+    rt::savePng(executableDirectory() / "Output" / "benchmark-cpu.png",
+                settings.width,
+                settings.height,
+                cpu,
+                settings.exposure);
     std::cout << "CPU reference (double precision, all cores): " << cpuSeconds
               << " s\nCompletion speedup: " << cpuSeconds / gpuSeconds
               << "x\nLinear RGB RMSE: " << std::sqrt(squared / (3 * image.size()))
@@ -133,8 +143,19 @@ int main(int argc, char** argv)
         {
             std::string arg = argv[i];
 
-            if (arg == "--test-cpu" || arg == "--test-gpu" || arg == "--benchmark")
+            if (arg == "--test-cpu" || arg == "--test-gpu" || arg == "--benchmark" || arg == "--render")
                 mode = arg;
+            else if (arg == "--no-redshift")
+                settings.redshift = false;
+            else if (arg == "--exposure")
+            {
+                if (++i >= argc)
+                    throw std::runtime_error("Missing value for --exposure");
+                std::size_t used = 0;
+                settings.exposure = std::stof(argv[i], &used);
+                if (used != std::string(argv[i]).size())
+                    throw std::runtime_error("Invalid exposure");
+            }
             else if (arg == "--width" || arg == "--height" || arg == "--samples" || arg == "--seed" ||
                      arg == "--assets")
             {
@@ -165,7 +186,8 @@ int main(int argc, char** argv)
             {
                 std::cout
                     << "SchwarzschildRayTracer [--width N --height N --samples N --seed N --assets DIR]\n"
-                    << "  --test-cpu | --test-gpu | --benchmark\n"
+                    << "  --test-cpu | --test-gpu | --benchmark | --render\n"
+                    << "  --exposure N | --no-redshift\n"
                     << "Arrows/Q/E move; WASD aim; P saves current image; Escape exits.\n";
                 return 0;
             }
@@ -185,9 +207,9 @@ int main(int argc, char** argv)
             return rt::runGpuTests(assets);
         }
 
-        if (mode == "--benchmark")
+        if (mode == "--benchmark" || mode == "--render")
         {
-            benchmark(assets, settings);
+            benchmark(assets, settings, mode == "--benchmark");
 
             return 0;
         }
@@ -311,7 +333,11 @@ int main(int argc, char** argv)
 
                         if (!reset && !minimized)
                         {
-                            rt::savePng(path, settings.width, settings.height, renderer.readback());
+                            rt::savePng(path,
+                                        settings.width,
+                                        settings.height,
+                                        renderer.readback(),
+                                        settings.exposure);
                             std::cout << "Saved " << path << std::endl;
                         }
                     }

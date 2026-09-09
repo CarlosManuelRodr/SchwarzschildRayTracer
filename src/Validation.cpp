@@ -131,8 +131,23 @@ int runCpuTests()
     field.materials.push_back({{DiffuseLight, 0, 0, 0}, {}});
     field.textures[0].color = {2, 1, 0.5f, 0};
     field.spheres.push_back({{0, 0, 3, 0.25f}, {1, 0, 0, 0}});
-    require(distance(traceCpu(field, settings, {0, 0, 4}, {0, 0, -1}).color, {2, 1, 0.5}) < 1e-12,
+    double staticShiftPower = std::pow((1.0 - 1.0 / 3.25) / (1.0 - 1.0 / 4.0), 2);
+    require(distance(traceCpu(field, settings, {0, 0, 4}, {0, 0, -1}).color,
+                     staticShiftPower * Vec3(2, 1, 0.5)) < 1e-8,
             "Missed surface inside gravity region");
+
+    auto earth = surfaceScene(Earth);
+    earth.materials.push_back({{DiffuseLight, 0, 0, 0}, {0, 5778, 12, 0.6f}});
+    earth.spheres.push_back({{0, 3, 4, 0.5f}, {1, 0, 0, 0}});
+    auto lit = traceCpu(earth, settings, {0, 0, 3}, {0, 0, -1});
+    require(dot(lit.color, lit.color) > 1e-5, "Earth must receive direct sunlight");
+    auto night = traceCpu(earth, settings, {0, 0, -3}, {0, 0, 1});
+    require(dot(night.color, night.color) < 0.01 * dot(lit.color, lit.color),
+            "Planet must shadow its night side");
+    earth.spheres.push_back({{0, 1.5f, 2.5f, 0.8f}, {0, 0, 0, 0}});
+    auto shadow = traceCpu(earth, settings, {0, 0, 3}, {0, 0, -1});
+    require(dot(shadow.color, shadow.color) < 0.1 * dot(lit.color, lit.color),
+            "Area-light shadows must block sunlight");
     std::cout << "CPU tests passed: intersections, textures, materials, capture, translation, convergence, "
                  "bounded integration.\n";
     return 0;
@@ -191,7 +206,23 @@ int runGpuTests(const std::filesystem::path& assets)
     embedded.textures[0].color = {2, 1, 0.5f, 0};
     embedded.spheres.push_back({{0, 0, 3, 0.25f}, {1, 0, 0, 0}});
     auto embeddedHit = gpu.traceRays(embedded, settings, {{Vec3(0, 0, 4), Vec3(0, 0, -1)}});
-    require(distance(embeddedHit[0].color, {2, 1, 0.5}) < 1e-5, "GPU missed object within gravity region");
+    require(distance(embeddedHit[0].color, traceCpu(embedded, settings, {0, 0, 4}, {0, 0, -1}).color) < 1e-5,
+            "GPU missed object within gravity region");
+
+    auto diskScene = fieldScene();
+    diskScene.disk.enabled = true;
+    std::vector<std::array<Vec3, 2>> diskRays = {{Vec3(4, 2, 1), Vec3(0, -1, 0)},
+                                                 {Vec3(-4, 2, 1), Vec3(0, -1, 0)},
+                                                 {Vec3(0, 2, 0), Vec3(0, -1, 0)},
+                                                 {Vec3(4, -2, 0), Vec3(0, 1, 0)}};
+    auto diskResults = gpu.traceRays(diskScene, settings, diskRays);
+    for (std::size_t i = 0; i < diskRays.size(); ++i)
+    {
+        auto reference = traceCpu(diskScene, settings, diskRays[i][0], diskRays[i][1]);
+        require(diskResults[i].status == reference.status &&
+                    distance(diskResults[i].color, reference.color) < 0.002,
+                "GPU disk/redshift mismatch");
+    }
 
     for (int kind : {Lambertian, Metal, Dielectric, DiffuseLight})
     {
@@ -241,7 +272,8 @@ int runGpuTests(const std::filesystem::path& assets)
     gpu.present(1, 1);
     unsigned char screen[4]{};
     glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, screen);
-    auto center = first[std::size_t(settings.height / 2) * settings.width + settings.width / 2];
+    auto center = displayColor(
+        first, settings.width, settings.height, settings.width / 2, settings.height / 2, settings.exposure);
     require(std::abs(int(screen[0]) - int(encodeSrgb(center.x))) <= 1 &&
                 std::abs(int(screen[1]) - int(encodeSrgb(center.y))) <= 1 &&
                 std::abs(int(screen[2]) - int(encodeSrgb(center.z))) <= 1,
@@ -272,7 +304,8 @@ int runGpuTests(const std::filesystem::path& assets)
     sf::Image png;
     require(png.loadFromFile(path.string()), "PNG export unreadable");
     std::filesystem::remove(path);
-    require(png.getPixel(0, 0) == sf::Color::Blue && png.getPixel(0, 1) == sf::Color::Red,
+    auto bright = encodeSrgb(toneMap(1));
+    require(png.getPixel(0, 0) == sf::Color(0, 0, bright) && png.getPixel(0, 1) == sf::Color(bright, 0, 0),
             "PNG orientation/color wrong");
     bool missing = false;
 

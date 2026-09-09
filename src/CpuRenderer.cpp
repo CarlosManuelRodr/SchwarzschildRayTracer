@@ -12,8 +12,13 @@ namespace reference
 using real = double;
 using vec3 = Vec3;
 using uint = std::uint32_t;
+using std::abs;
 using std::asin;
 using std::clamp;
+using std::cos;
+using std::exp;
+using std::floor;
+using std::log;
 using std::max;
 using std::min;
 using std::pow;
@@ -73,6 +78,76 @@ int materialTexture(int i)
 real materialParameter(int i)
 {
     return scene->materials[i].parameters.x;
+}
+
+vec3 materialEmission(int i)
+{
+    auto p = scene->materials[i].parameters;
+    return {p.y, p.z, p.w};
+}
+
+int blackHole()
+{
+    for (int i = 0; i < sphereCount(); ++i)
+        if (materialKind(sphereMaterial(i)) == Schwarzschild)
+            return i;
+
+    return -1;
+}
+
+int planet()
+{
+    for (int i = 0; i < sphereCount(); ++i)
+        if (materialKind(sphereMaterial(i)) == Earth)
+            return i;
+
+    return -1;
+}
+
+bool diskEnabled()
+{
+    return scene->disk.enabled;
+}
+
+vec3 diskNormal()
+{
+    return normalized(scene->disk.normal);
+}
+
+real diskInner()
+{
+    return scene->disk.innerRadius;
+}
+
+real diskOuter()
+{
+    return scene->disk.outerRadius;
+}
+
+real diskPeakTemperature()
+{
+    return scene->disk.peakTemperature;
+}
+
+real diskScale()
+{
+    return scene->disk.emissionScale;
+}
+
+real atmosphereHeight()
+{
+    return scene->atmosphereHeight;
+}
+
+bool redshiftEnabled()
+{
+    return settings->redshift;
+}
+
+vec3 thermalTexel(int i)
+{
+    auto c = blackbodyTable()[std::size_t(i)];
+    return {c.x, c.y, c.z};
 }
 
 int textureKind(int i)
@@ -248,5 +323,32 @@ void runCoreTests()
         auto x = reference::randomValue(a);
         require(x >= 0 && x < 1 && x == reference::randomValue(b));
     }
+
+    scene.materials = {{{Schwarzschild, 0, 0, 0}, {}}};
+    scene.spheres = {{{0, 0, 0, 8}, {0, 0, 0, 0}}};
+    scene.disk.enabled = true;
+    require(std::abs(reference::lapseAt({4, 0, 0}) - std::sqrt(0.75)) < 1e-12);
+    require(reference::diskHit({4, 2, 0}, {0, -1, 0}, 0, 100, t) && std::abs(t - 2) < 1e-12);
+    require(!reference::diskHit({0, 2, 0}, {0, -1, 0}, 0, 100, t));
+    require(!reference::diskHit({6, 2, 0}, {0, -1, 0}, 0, 100, t));
+    require(reference::diskTemperature(3) == 0);
+    require(std::abs(reference::diskTemperature(49.0 / 12.0) - scene.disk.peakTemperature) < 0.001);
+
+    double approaching = reference::diskFrequencyShift({4, 0, 0}, {0, 0, -1}, 1);
+    double receding = reference::diskFrequencyShift({4, 0, 0}, {0, 0, 1}, 1);
+    require(approaching > 1 && receding < 1);
+    auto blue = reference::blackbody(6000 * approaching);
+    auto red = reference::blackbody(6000 * receding);
+    require(blue.z / blue.x > red.z / red.x && blue.y > red.y);
+    settings.redshift = false;
+    require(reference::diskFrequencyShift({4, 0, 0}, {0, 0, -1}, 1) == 1);
+    settings.redshift = true;
+
+    scene.materials[0] = {{DiffuseLight, 0, 0, 0}, {0, 5778, 1, 0.6f}};
+    auto source = reference::makeHit(0, {0, 0, 8}, {0, 0, 1}, 0);
+    auto centerLight = reference::surfaceRadiance(source, {0, 0, 1}, 1);
+    auto limbLight = reference::surfaceRadiance(source, {1, 0, 0}, 1);
+    require(std::abs(limbLight.y / centerLight.y - (1.0 - double(0.6f))) < 1e-6);
+    require(toneMap(100) >= toneMap(10) && toneMap(10) > toneMap(1));
 }
 } // namespace rt

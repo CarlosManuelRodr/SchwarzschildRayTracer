@@ -15,6 +15,7 @@ find_package(GLEW REQUIRED)
 add_executable(SchwarzschildRayTracer
     src/Main.cpp
     src/SceneData.cpp
+    src/Blackbody.cpp
     src/CpuRenderer.cpp
     src/GpuRenderer.cpp
     src/Validation.cpp

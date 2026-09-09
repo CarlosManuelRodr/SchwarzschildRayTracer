@@ -91,7 +91,9 @@ enum MaterialKind
     Metal,
     Dielectric,
     DiffuseLight,
-    Schwarzschild
+    Schwarzschild,
+    Earth,
+    Environment
 };
 
 enum TextureKind
@@ -110,7 +112,8 @@ struct SphereData
 struct MaterialData
 {
     Int4 kindTexture;
-    Float4 parameters; // fuzz / IOR
+    // x: fuzz / IOR / environment intensity; thermal light y/z/w: kelvin, scale, limb.
+    Float4 parameters;
 };
 
 struct TextureData
@@ -120,12 +123,24 @@ struct TextureData
     Int4 image; // offset, width, height
 };
 
+struct AccretionDisk
+{
+    bool enabled = false;
+    float innerRadius = 3.0f;
+    float outerRadius = 5.2f;
+    float peakTemperature = 6000.0f;
+    float emissionScale = 0.35f;
+    Vec3 normal{0, 1, 0};
+};
+
 struct SceneData
 {
     std::vector<SphereData> spheres;
     std::vector<MaterialData> materials;
     std::vector<TextureData> textures;
     std::vector<Float4> texels; // decoded linear RGB, original image row order
+    AccretionDisk disk;
+    float atmosphereHeight = 0.045f;
 
     void validate() const;
 };
@@ -136,6 +151,8 @@ struct RenderSettings
     int height = 600;
     int samples = 30;
     std::uint32_t seed = 1;
+    bool redshift = true;
+    float exposure = 1.0f;
 
     float relativeTolerance = 1e-4f;
     float absoluteTolerance = 1e-6f;
@@ -147,10 +164,10 @@ struct RenderSettings
 
 struct CameraData
 {
-    Vec3 position{4, 7, 3};
-    Vec3 lookAt{4, 0, -1};
+    Vec3 position{4, 3, 9};
+    Vec3 lookAt{2, 0, -1};
     Vec3 up{0, 1, 0};
-    double verticalFov = 90;
+    double verticalFov = 75;
 
     std::array<Vec3, 4> basis(double aspect) const;
 };
@@ -158,5 +175,13 @@ struct CameraData
 SceneData defaultScene(const std::filesystem::path& assets);
 float decodeSrgb(float value);
 unsigned char encodeSrgb(double value);
-void savePng(const std::filesystem::path& path, int width, int height, const std::vector<Float4>& linear);
+double toneMap(double value, double exposure = 1.0);
+Vec3 displayColor(
+    const std::vector<Float4>& linear, int width, int height, int x, int y, float exposure = 1.0f);
+const std::vector<Float4>& blackbodyTable();
+void savePng(const std::filesystem::path& path,
+             int width,
+             int height,
+             const std::vector<Float4>& linear,
+             float exposure = 1.0f);
 } // namespace rt

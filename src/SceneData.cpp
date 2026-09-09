@@ -58,9 +58,9 @@ unsigned char encodeSrgb(double v)
 void RenderSettings::validate() const
 {
     if (width <= 0 || height <= 0 || width > 8192 || height > 8192 || samples <= 0 || samples > 1000000 ||
-        !(relativeTolerance > 0) || !(absoluteTolerance > 0) || !(maxStep > 0) || maxStep > 0.05f ||
-        !std::isfinite(relativeTolerance) || !std::isfinite(absoluteTolerance) ||
-        maxIntegrationAttempts <= 0 || maxIntegrationAttempts > 16384 ||
+        !(exposure > 0) || !std::isfinite(exposure) || !(relativeTolerance > 0) || !(absoluteTolerance > 0) ||
+        !(maxStep > 0) || maxStep > 0.05f || !std::isfinite(relativeTolerance) ||
+        !std::isfinite(absoluteTolerance) || maxIntegrationAttempts <= 0 || maxIntegrationAttempts > 16384 ||
         std::uint64_t(width) * std::uint64_t(height) * std::uint64_t(samples) > 0xffffffffull)
         throw std::runtime_error(
             "Invalid render settings (dimensions 1..8192, samples 1..1000000, step <= 0.05)");
@@ -95,10 +95,29 @@ void SceneData::validate() const
         throw std::runtime_error("Only one Schwarzschild gravity region is supported");
 
     for (auto m : materials)
-        if (m.kindTexture.x < 0 || m.kindTexture.x > Schwarzschild || m.kindTexture.y < 0 ||
+    {
+        if (m.kindTexture.x < 0 || m.kindTexture.x > Environment || m.kindTexture.y < 0 ||
             m.kindTexture.y >= int(textures.size()) || !finite(m.parameters) ||
             (m.kindTexture.x == Dielectric && m.parameters.x <= 0))
             throw std::runtime_error("Invalid material");
+
+        if (m.kindTexture.x == DiffuseLight &&
+            (m.parameters.y < 0 || m.parameters.y > 50000 || m.parameters.z < 0 || m.parameters.w < 0 ||
+             m.parameters.w > 1))
+            throw std::runtime_error(
+                "Invalid thermal source (temperature 0..50000 K, limb coefficient 0..1)");
+    }
+
+    if (disk.enabled &&
+        (fields != 1 || !std::isfinite(disk.innerRadius) || disk.innerRadius < 3 ||
+         !std::isfinite(disk.outerRadius) || disk.outerRadius <= disk.innerRadius ||
+         !std::isfinite(disk.peakTemperature) || disk.peakTemperature < 1000 ||
+         disk.peakTemperature > 20000 || !std::isfinite(disk.emissionScale) || disk.emissionScale < 0 ||
+         !std::isfinite(dot(disk.normal, disk.normal)) || dot(disk.normal, disk.normal) < 1e-12))
+        throw std::runtime_error("Invalid accretion disk (inner radius >= 3, temperature 1000..20000 K)");
+
+    if (!std::isfinite(atmosphereHeight) || atmosphereHeight <= 0 || atmosphereHeight > 0.2f)
+        throw std::runtime_error("Atmosphere height must be in (0, 0.2]");
     std::vector<int> visiting(textures.size());
     std::function<void(int, int)> check = [&](int i, int depth)
     {
@@ -160,20 +179,59 @@ SceneData defaultScene(const std::filesystem::path& assets)
     TextureData light;
     light.color = {2, 2, 2, 0};
     s.textures.push_back(light);
-    s.materials = {{{Lambertian, earth, 0, 0}, {}},
-                   {{DiffuseLight, 2, 0, 0}, {}},
+    s.materials = {{{Earth, earth, 0, 0}, {0.12f, 0, 0, 0}},
+                   {{DiffuseLight, 2, 0, 0}, {0, 5778, 24, 0.6f}},
                    {{Schwarzschild, 2, 0, 0}, {}},
-                   {{Lambertian, sky, 0, 0}, {}}};
+                   {{Environment, sky, 0, 0}, {0.2f, 0, 0, 0}}};
     s.spheres = {{{7, 0, -1, 1}, {0, 0, 0, 0}},
-                 {{7, 2.5f, -1, 0.5f}, {1, 0, 0, 0}},
+                 {{8, 4, 1, 0.65f}, {1, 0, 0, 0}},
                  {{0, 0, -1, 5.5f}, {2, 0, 0, 0}},
                  {{0, 0, 0, 200}, {3, 0, 0, 0}}};
+    s.disk.enabled = true;
     s.validate();
 
     return s;
 }
 
-void savePng(const std::filesystem::path& path, int width, int height, const std::vector<Float4>& linear)
+double toneMap(double value, double exposure)
+{
+    if (!std::isfinite(value))
+        return 0;
+
+    double x = std::max(0.0, value * exposure);
+    return std::clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+
+Vec3 displayColor(const std::vector<Float4>& linear, int width, int height, int x, int y, float exposure)
+{
+    const double weights[] = {1, 4, 6, 4, 1};
+    Vec3 bloom;
+
+    // A small, energy-limited camera glare filter. It does not illuminate geometry.
+    for (int j = -2; j <= 2; ++j)
+    {
+        for (int i = -2; i <= 2; ++i)
+        {
+            int sx = std::clamp(x + 4 * i, 0, width - 1);
+            int sy = std::clamp(y + 4 * j, 0, height - 1);
+            auto sample = linear[std::size_t(sy) * width + sx];
+            Vec3 hdr = exposure * Vec3(sample.x, sample.y, sample.z);
+            double luminance = dot(hdr, {0.2126, 0.7152, 0.0722});
+            double excess = std::max(0.0, luminance - 1.0) / std::max(luminance, 1e-8);
+            bloom += hdr * (excess * weights[i + 2] * weights[j + 2] / 256.0);
+        }
+    }
+
+    auto pixel = linear[std::size_t(y) * width + x];
+    Vec3 hdr = exposure * Vec3(pixel.x, pixel.y, pixel.z) + 0.08 * bloom;
+    return {toneMap(hdr.x), toneMap(hdr.y), toneMap(hdr.z)};
+}
+
+void savePng(const std::filesystem::path& path,
+             int width,
+             int height,
+             const std::vector<Float4>& linear,
+             float exposure)
 {
     if (linear.size() != std::size_t(width) * height)
         throw std::runtime_error("Wrong image size for PNG export");
@@ -182,7 +240,7 @@ void savePng(const std::filesystem::path& path, int width, int height, const std
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x)
         {
-            auto c = linear[std::size_t(y) * width + x];
+            auto c = displayColor(linear, width, height, x, y, exposure);
             auto i = 4 * (std::size_t(height - 1 - y) * width + x);
             rgba[i] = encodeSrgb(c.x);
             rgba[i + 1] = encodeSrgb(c.y);

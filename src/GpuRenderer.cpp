@@ -208,6 +208,13 @@ GpuRenderer::GpuRenderer(const std::filesystem::path& assets) : impl(new Impl)
         throw std::runtime_error("Missing trace shader include marker");
     source.replace(
         marker, std::string("// TRACE_CORE").size(), readText(assets / "shaders" / "TraceCore.inl"));
+    auto lightingMarker = source.find("#include \"LightingCore.inl\"");
+    if (lightingMarker == std::string::npos)
+        throw std::runtime_error("Missing lighting shader include marker");
+
+    source.replace(lightingMarker,
+                   std::string("#include \"LightingCore.inl\"").size(),
+                   readText(assets / "shaders" / "LightingCore.inl"));
     g.trace = program({{GL_COMPUTE_SHADER, source}});
     g.display = program({{GL_VERTEX_SHADER, readText(assets / "shaders" / "fullscreen.vert")},
                          {GL_FRAGMENT_SHADER, readText(assets / "shaders" / "display.frag")}});
@@ -245,10 +252,35 @@ void GpuRenderer::uploadScene(const SceneData& scene)
     g.buffer(1, scene.materials.data(), scene.materials.size() * sizeof(MaterialData));
     g.buffer(2, scene.textures.data(), scene.textures.size() * sizeof(TextureData));
 
-    Float4 zero;
-    g.buffer(3,
-             scene.texels.empty() ? &zero : scene.texels.data(),
-             std::max<std::size_t>(1, scene.texels.size()) * sizeof(Float4));
+    auto texels = scene.texels;
+    const auto& thermal = blackbodyTable();
+    texels.insert(texels.end(), thermal.begin(), thermal.end());
+    g.buffer(3, texels.data(), texels.size() * sizeof(Float4));
+
+    glUseProgram(g.trace);
+    int hole = -1;
+    int earth = -1;
+    for (int i = 0; i < int(scene.spheres.size()); ++i)
+    {
+        int kind = scene.materials[scene.spheres[i].material.x].kindTexture.x;
+        if (kind == Schwarzschild)
+            hole = i;
+        if (kind == Earth)
+            earth = i;
+    }
+
+    g.integer("holeIndex", hole);
+    g.integer("planetIndex", earth);
+    g.integer("thermalOffset", int(scene.texels.size()));
+    g.integer("diskOn", scene.disk.enabled ? 1 : 0);
+    auto normal = normalized(scene.disk.normal);
+    glUniform3f(glGetUniformLocation(g.trace, "diskAxis"), float(normal.x), float(normal.y), float(normal.z));
+    glUniform4f(glGetUniformLocation(g.trace, "diskConfig"),
+                scene.disk.innerRadius,
+                scene.disk.outerRadius,
+                scene.disk.peakTemperature,
+                scene.disk.emissionScale);
+    glUniform1f(glGetUniformLocation(g.trace, "airHeight"), scene.atmosphereHeight);
     g.sceneReady = true;
     checkGl("Scene upload");
 }
@@ -300,6 +332,7 @@ void GpuRenderer::reset(const RenderSettings& settings, const CameraData& camera
     g.integer("targetSamples", settings.samples);
     g.integer("testMode", 0);
     g.integer("maxAttempts", settings.maxIntegrationAttempts);
+    g.integer("useRedshift", settings.redshift ? 1 : 0);
 
     glUniform1f(glGetUniformLocation(g.trace, "relTolerance"), settings.relativeTolerance);
     glUniform1f(glGetUniformLocation(g.trace, "absTolerance"), settings.absoluteTolerance);
@@ -392,6 +425,7 @@ void GpuRenderer::present(int width, int height)
     if (!g.hasImage)
         return;
     glUseProgram(g.display);
+    glUniform1f(glGetUniformLocation(g.display, "exposure"), g.settings.exposure);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g.texture);
     glUniform1i(glGetUniformLocation(g.display, "accumulation"), 0);

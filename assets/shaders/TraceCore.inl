@@ -11,6 +11,7 @@ struct TraceState
     vec3 radiance;
     real h2;
     real step;
+    real observerLapse;
     int field;
     int attempts;
     int depth;
@@ -149,6 +150,8 @@ vec3 textureValue(int index, real u, real v, vec3 p)
     return vec3(0); // Scene validation rejects cycles/depth overflow.
 }
 
+#include "LightingCore.inl"
+
 void initTrace(OUT(TraceState) s, vec3 p, vec3 v, uint seed)
 {
     s.p = p;
@@ -162,6 +165,7 @@ void initTrace(OUT(TraceState) s, vec3 p, vec3 v, uint seed)
     s.depth = 0;
     s.status = 0;
     s.rng = seed;
+    s.observerLapse = lapseAt(p);
 }
 
 void failTrace(INOUT(TraceState) s)
@@ -176,11 +180,21 @@ void scatterSurface(INOUT(TraceState) s, SurfaceHit hit)
     int kind = materialKind(mat);
     vec3 color = textureValue(materialTexture(mat), hit.u, hit.v, hit.p);
 
-    if (kind == 3)
+    if (kind == 3 || kind == 6)
     {
-        s.radiance += s.throughput * color;
+        vec3 emitted = kind == 6
+                           ? materialParameter(mat) * color * pow(lapseAt(hit.p) / s.observerLapse, real(4))
+                           : surfaceRadiance(hit, -s.v, s.observerLapse);
+        s.radiance += s.throughput * emitted;
         s.status = 1;
 
+        return;
+    }
+
+    if (kind == 5)
+    {
+        s.radiance += s.throughput * illuminateEarth(s, hit, color);
+        s.status = 1;
         return;
     }
 
@@ -344,6 +358,12 @@ void integrateField(INOUT(TraceState) s)
         eventKind = 2;
     }
 
+    if (diskHit(s.p, delta, real(1e-7), eventT, t))
+    {
+        eventT = t;
+        eventKind = 4;
+    }
+
     // A boundary point moving inward has a zero entry root; only accept the exit.
     if (length(pn - center) >= sphereRadius(s.field) && dot(delta, pn - center) > real(0) &&
         sphereRoot(s.p, delta, center, sphereRadius(s.field), real(1e-7), eventT, t))
@@ -353,6 +373,8 @@ void integrateField(INOUT(TraceState) s)
     }
 
     vec3 previousV = s.v;
+    real segmentLength = length(delta);
+    transferAtmosphere(s, safeUnit(delta), min(eventT, real(1)) * segmentLength);
 
     if (eventKind != 0)
     {
@@ -371,6 +393,11 @@ void integrateField(INOUT(TraceState) s)
         scatterSurface(s, hit);
     else if (eventKind == 2)
         s.status = 3;
+    else if (eventKind == 4)
+    {
+        s.radiance += s.throughput * diskRadiance(s.p, -s.v, s.observerLapse);
+        s.status = 1;
+    }
     else if (eventKind == 3 ||
              (length(s.p - center) >= sphereRadius(s.field) && dot(s.p - center, s.v) > real(0)))
     {
@@ -411,7 +438,21 @@ void advanceTrace(INOUT(TraceState) s)
 
     SurfaceHit hit;
 
-    if (!worldHit(s.p, s.v, EPS, real(1e30), false, hit))
+    bool hitWorld = worldHit(s.p, s.v, EPS, real(1e30), false, hit);
+    real maximum = hitWorld ? hit.t : real(1e30);
+    real diskDistance = real(0);
+    bool hitDisk = diskHit(s.p, s.v, EPS, maximum, diskDistance);
+    transferAtmosphere(s, safeUnit(s.v), hitDisk ? diskDistance : maximum);
+
+    if (hitDisk)
+    {
+        s.p = s.p + diskDistance * s.v;
+        s.radiance += s.throughput * diskRadiance(s.p, -s.v, s.observerLapse);
+        s.status = 1;
+        return;
+    }
+
+    if (!hitWorld)
     {
         real t = real(0.5) * (safeUnit(s.v).y + real(1));
         s.radiance += s.throughput * ((real(1) - t) * vec3(1) + t * vec3(real(0.5), real(0.7), real(1)));
