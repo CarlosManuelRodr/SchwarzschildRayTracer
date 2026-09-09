@@ -73,9 +73,10 @@ el benchmark CPU. La ventana interactiva conserva la exportación manual con P.
 
 | Control | Acción |
 | --- | --- |
-| Flechas | Mover la cámara y su objetivo en X/Z |
+| Clic izquierdo + arrastrar | Girar la vista (derecha/izquierda y arriba/abajo) |
+| ↑ / W, ↓ / S | Avanzar / retroceder en la dirección de la vista |
+| ← / A, → / D | Desplazarse lateralmente respecto a la vista |
 | Q / E | Subir / bajar la cámara y su objetivo |
-| W A S D | Mover el objetivo de la cámara en X/Z |
 | P | Guardar las muestras disponibles como PNG en `Output/`, junto al ejecutable |
 | Escape | Salir |
 
@@ -85,6 +86,10 @@ La barra de título muestra GPU, promedio de muestras por píxel, tiempo del úl
 lote GPU y número de rayos inválidos. Los píxeles avanzan independientemente;
 algunos pueden terminar antes que otros. Mientras se mueve la cámara se ve una
 imagen incompleta que se refina al detenerse.
+La rotación conserva la posición de la cámara y limita la inclinación a ±89°
+para evitar giros invertidos. Arrastrar termina al soltar el botón, salir de la
+ventana, cambiar su tamaño o perder el foco. WASD y las flechas son equivalentes;
+mantener ambas teclas de la misma dirección no duplica la velocidad.
 Al ampliar mucho la ventana, la resolución interna se ajusta al límite de SSBO
 del controlador (y a un presupuesto de 256 MiB de estados), conservando la
 proporción. La barra de título muestra la resolución interna; el PNG usa ese

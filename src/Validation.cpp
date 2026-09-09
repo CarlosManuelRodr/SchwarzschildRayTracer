@@ -84,6 +84,28 @@ void runCoreTests();
 int runCpuTests()
 {
     runCoreTests();
+
+    CameraData navigation;
+    navigation.position = {0, 0, 0};
+    navigation.lookAt = {0, 0, -2};
+    navigation.rotateView(3.141592653589793 / 2, 0);
+    require(distance(navigation.lookAt, {2, 0, 0}) < 1e-12,
+            "Mouse yaw must turn right and preserve focus distance");
+    navigation.moveLocal({0, 0, 1}, 1);
+    require(distance(navigation.position, {1, 0, 0}) < 1e-12,
+            "Forward movement must follow the rotated view");
+    navigation.moveLocal({1, 0, 0}, 1);
+    require(distance(navigation.position, {1, 0, 1}) < 1e-12, "Strafing must use camera right");
+    navigation.rotateView(0, 100);
+    auto beforeMove = navigation.position;
+    navigation.moveLocal({0, 0, 1}, 1);
+    require(navigation.position.y > beforeMove.y + 0.99, "Forward movement must follow camera pitch");
+    navigation.basis(4.0 / 3.0);
+    navigation.rotateView(0, -200);
+    navigation.basis(4.0 / 3.0);
+    require(std::abs(distance(navigation.position, navigation.lookAt) - 2) < 1e-12,
+            "Pitch clamping must preserve focus distance and a valid basis");
+
     RenderSettings settings;
     auto field = fieldScene();
     field.validate();

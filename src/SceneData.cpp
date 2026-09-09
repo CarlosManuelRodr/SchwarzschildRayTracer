@@ -40,6 +40,34 @@ std::array<Vec3, 4> CameraData::basis(double aspect) const
     return {position, position - h * aspect * u - h * v - w, 2 * h * aspect * u, 2 * h * v};
 }
 
+void CameraData::moveLocal(Vec3 direction, double distance)
+{
+    Vec3 forward = normalized(lookAt - position);
+    Vec3 right = normalized(cross(forward, up));
+    Vec3 local = distance * normalized(direction);
+    Vec3 displacement = local.x * right + local.y * normalized(up) + local.z * forward;
+
+    position += displacement;
+    lookAt += displacement;
+}
+
+void CameraData::rotateView(double yaw, double pitch)
+{
+    Vec3 offset = lookAt - position;
+    double distance = std::sqrt(dot(offset, offset));
+    Vec3 forward = normalized(offset);
+    Vec3 vertical = normalized(up);
+    Vec3 horizontal = normalized(forward - dot(forward, vertical) * vertical);
+    Vec3 right = normalized(cross(horizontal, vertical));
+    double elevation = std::asin(std::clamp(dot(forward, vertical), -1.0, 1.0));
+
+    // Stop just short of the poles to preserve a stable, roll-free camera basis.
+    constexpr double pitchLimit = 89.0 * 3.141592653589793 / 180.0;
+    elevation = std::clamp(elevation + pitch, -pitchLimit, pitchLimit);
+    horizontal = std::cos(yaw) * horizontal + std::sin(yaw) * right;
+    lookAt = position + distance * (std::cos(elevation) * horizontal + std::sin(elevation) * vertical);
+}
+
 float decodeSrgb(float v)
 {
     return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f);

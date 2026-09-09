@@ -228,8 +228,11 @@ int main(int argc, char** argv)
         renderer.uploadScene(scene);
         renderer.reset(settings, camera);
         std::cout << "GPU: " << renderer.device()
-                  << "\nP saves the current image; arrows/Q/E move; WASD aim.\n";
+                  << "\nLeft-drag to look; arrows/WASD move; Q/E rise/descend; P saves.\n";
         bool running = true, focused = true, minimized = false, redraw = true;
+        bool dragging = false;
+        sf::Vector2i mousePosition;
+        constexpr double mouseSensitivity = 0.004;
         auto last = Clock::now(), titleTime = last;
 
         while (running)
@@ -244,28 +247,60 @@ int main(int argc, char** argv)
                     running = false;
 
                 if (event.type == sf::Event::LostFocus)
+                {
                     focused = false;
+                    dragging = false;
+                }
 
                 if (event.type == sf::Event::GainedFocus)
                     focused = true;
 
-                // Handle quick taps even if the key is released between frame polls.
-                if (event.type == sf::Event::KeyPressed)
+                if (event.type == sf::Event::MouseButtonPressed &&
+                    event.mouseButton.button == sf::Mouse::Left && focused && !minimized)
                 {
-                    rt::Vec3 movement, aim;
+                    dragging = true;
+                    mousePosition = {event.mouseButton.x, event.mouseButton.y};
+                }
+
+                if ((event.type == sf::Event::MouseButtonReleased &&
+                     event.mouseButton.button == sf::Mouse::Left) ||
+                    event.type == sf::Event::MouseLeft)
+                    dragging = false;
+
+                if (event.type == sf::Event::MouseMoved && dragging && focused && !minimized)
+                {
+                    sf::Vector2i position(event.mouseMove.x, event.mouseMove.y);
+                    auto delta = position - mousePosition;
+                    mousePosition = position;
+
+                    if (delta.x != 0 || delta.y != 0)
+                    {
+                        camera.rotateView(delta.x * mouseSensitivity, -delta.y * mouseSensitivity);
+                        reset = true;
+                    }
+                }
+
+                // Handle quick taps even if the key is released between frame polls.
+                if (event.type == sf::Event::KeyPressed && focused && !minimized)
+                {
+                    rt::Vec3 movement;
                     switch (event.key.code)
                     {
                     case sf::Keyboard::Right:
+                    case sf::Keyboard::D:
                         movement.x = 1;
                         break;
                     case sf::Keyboard::Left:
+                    case sf::Keyboard::A:
                         movement.x = -1;
                         break;
                     case sf::Keyboard::Up:
-                        movement.z = -1;
+                    case sf::Keyboard::W:
+                        movement.z = 1;
                         break;
                     case sf::Keyboard::Down:
-                        movement.z = 1;
+                    case sf::Keyboard::S:
+                        movement.z = -1;
                         break;
                     case sf::Keyboard::Q:
                         movement.y = 1;
@@ -273,43 +308,21 @@ int main(int argc, char** argv)
                     case sf::Keyboard::E:
                         movement.y = -1;
                         break;
-                    case sf::Keyboard::D:
-                        aim.x = 1;
-                        break;
-                    case sf::Keyboard::A:
-                        aim.x = -1;
-                        break;
-                    case sf::Keyboard::W:
-                        aim.z = -1;
-                        break;
-                    case sf::Keyboard::S:
-                        aim.z = 1;
-                        break;
                     default:
                         break;
                     }
 
-                    if (rt::dot(movement, movement) + rt::dot(aim, aim) > 0)
+                    if (rt::dot(movement, movement) > 0)
                     {
-                        auto candidate = camera;
-                        candidate.position += 0.05 * movement;
-                        candidate.lookAt += 0.05 * (movement + aim);
-
-                        try
-                        {
-                            candidate.basis(double(settings.width) / settings.height);
-                            camera = candidate;
-                            reset = true;
-                            tapped = true;
-                        }
-                        catch (const std::exception&)
-                        {
-                        }
+                        camera.moveLocal(movement, 0.05);
+                        reset = true;
+                        tapped = true;
                     }
                 }
 
                 if (event.type == sf::Event::Resized)
                 {
+                    dragging = false;
                     minimized = event.size.width == 0 || event.size.height == 0;
 
                     if (!minimized)
@@ -358,30 +371,18 @@ int main(int argc, char** argv)
             {
                 auto key = [](sf::Keyboard::Key k)
                 {
-                    return sf::Keyboard::isKeyPressed(k) ? 1.0 : 0.0;
+                    return sf::Keyboard::isKeyPressed(k);
                 };
-                rt::Vec3 movement(key(sf::Keyboard::Right) - key(sf::Keyboard::Left),
+                rt::Vec3 movement((key(sf::Keyboard::Right) || key(sf::Keyboard::D)) -
+                                      (key(sf::Keyboard::Left) || key(sf::Keyboard::A)),
                                   key(sf::Keyboard::Q) - key(sf::Keyboard::E),
-                                  key(sf::Keyboard::Down) - key(sf::Keyboard::Up));
-                rt::Vec3 aim(key(sf::Keyboard::D) - key(sf::Keyboard::A),
-                             0,
-                             key(sf::Keyboard::S) - key(sf::Keyboard::W));
+                                  (key(sf::Keyboard::Up) || key(sf::Keyboard::W)) -
+                                      (key(sf::Keyboard::Down) || key(sf::Keyboard::S)));
 
-                if (rt::dot(movement, movement) + rt::dot(aim, aim) > 0)
+                if (rt::dot(movement, movement) > 0)
                 {
-                    auto candidate = camera;
-                    candidate.position += dt * movement;
-                    candidate.lookAt += dt * (movement + aim);
-
-                    try
-                    {
-                        candidate.basis(double(settings.width) / settings.height);
-                        camera = candidate;
-                        reset = true;
-                    }
-                    catch (const std::exception&)
-                    {
-                    }
+                    camera.moveLocal(movement, dt);
+                    reset = true;
                 }
             }
 

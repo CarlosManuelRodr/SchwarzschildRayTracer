@@ -169,6 +169,9 @@ struct CameraData
     Vec3 up{0, 1, 0};
     double verticalFov = 75;
 
+    void moveLocal(Vec3 direction, double distance);
+    void rotateView(double yaw, double pitch);
+
     std::array<Vec3, 4> basis(double aspect) const;
 };
 
