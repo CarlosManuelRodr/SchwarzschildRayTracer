@@ -234,6 +234,34 @@ int runGpuTests(const std::filesystem::path& assets)
                                              {Vec3(-7, 2.5, 0), Vec3(1, 0, 0)}};
     auto field = fieldScene();
     auto results = gpu.traceRays(field, settings, rays);
+    auto backgroundScene = fieldScene();
+    backgroundScene.textures[0].color = {1, 0, 0, 0};
+    backgroundScene.materials.push_back({{Environment, 0, 0, 0}, {1, 0, 0, 0}});
+    backgroundScene.spheres.push_back({{0, 0, 0, 200}, {1, 0, 0, 0}});
+    std::vector<std::array<Vec3, 2>> boundaryRays;
+    for (int i = 0; i < 256; ++i)
+    {
+        double angle = i * 6.283185307179586 / 256;
+        Vec3 direction{std::cos(angle), 0, std::sin(angle)};
+        boundaryRays.push_back({199.999999 * direction, direction});
+        boundaryRays.push_back({200.0 * direction, direction});
+    }
+    for (auto mode : {RenderSettings::FixedRadius, RenderSettings::FullScene, RenderSettings::AdaptiveCutoff})
+    {
+        auto boundarySettings = settings;
+        boundarySettings.integrationMode = mode;
+        boundarySettings.redshift = false;
+        auto boundaryResults = gpu.traceRays(backgroundScene, boundarySettings, boundaryRays);
+        for (std::size_t i = 0; i < boundaryRays.size(); ++i)
+        {
+            require(boundaryResults[i].status == 1 && distance(boundaryResults[i].color, {1, 0, 0}) < 1e-6,
+                    "GPU background crossing must never leak fallback sky through rounding gaps");
+            auto cpuBoundary =
+                traceCpu(backgroundScene, boundarySettings, boundaryRays[i][0], boundaryRays[i][1]);
+            require(cpuBoundary.status == 1 && distance(cpuBoundary.color, {1, 0, 0}) < 1e-6,
+                    "CPU background crossing must include points on the surface");
+        }
+    }
     for (auto mode : {RenderSettings::FixedRadius, RenderSettings::AdaptiveCutoff})
     {
         auto modeSettings = settings;

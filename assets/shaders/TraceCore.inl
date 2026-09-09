@@ -102,6 +102,8 @@ SurfaceHit makeHit(int sphere, vec3 p, vec3 v, real t)
     hit.p = p + t * v;
     hit.sphere = sphere;
     hit.normal = (hit.p - sphereCenter(sphere)) / sphereRadius(sphere);
+    if (materialKind(sphereMaterial(sphere)) == 6)
+        hit.normal = safeUnit(hit.normal);
     hit.u = real(1) - (atan(hit.normal.z, hit.normal.x) + PI) / (real(2) * PI);
     hit.v = (asin(clamp(hit.normal.y, real(-1), real(1))) + PI / real(2)) / PI;
 
@@ -117,8 +119,25 @@ bool worldHit(vec3 p, vec3 v, real lo, real hi, bool solidsOnly, OUT(SurfaceHit)
         if (solidsOnly && materialKind(sphereMaterial(i)) == 4)
             continue;
         real t = real(0);
+        bool intersects = sphereRoot(p, v, sphereCenter(i), sphereRadius(i), lo, hi, t);
 
-        if (sphereRoot(p, v, sphereCenter(i), sphereRadius(i), lo, hi, t))
+        // Integrated rays can round onto the environment surface before the
+        // quadratic reports a positive root. Accept an outward zero-distance
+        // hit in a small float-precision band instead of stepping past the sky.
+        // Apply this only to the terminal environment, never ordinary geometry.
+        if (!intersects && materialKind(sphereMaterial(i)) == 6)
+        {
+            vec3 relative = p - sphereCenter(i);
+            real radius = sphereRadius(i);
+            real roundingBand = real(8 * 1.1920928955078125e-7) * max(real(1), radius);
+            if (abs(length(relative) - radius) <= roundingBand && dot(relative, v) > real(0))
+            {
+                t = real(0);
+                intersects = true;
+            }
+        }
+
+        if (intersects)
         {
             hi = t;
             hit = makeHit(i, p, v, t);
