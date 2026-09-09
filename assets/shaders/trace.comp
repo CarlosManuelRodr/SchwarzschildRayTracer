@@ -82,6 +82,13 @@ layout(rgba32f, binding = 0) uniform image2D accumulation;
 uniform ivec2 dimensions;
 uniform int targetSamples, resetState, testMode;
 uniform int firstPassOnly;
+uniform int gravityMode;
+
+int integrationMode()
+{
+    return gravityMode;
+}
+
 uniform uint seed;
 uniform vec3 cameraOrigin, cameraCorner, cameraHorizontal, cameraVertical;
 uniform float relTolerance, absTolerance, maxStep;

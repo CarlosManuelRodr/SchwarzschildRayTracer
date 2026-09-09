@@ -85,6 +85,8 @@ unsigned char encodeSrgb(double v)
 
 void RenderSettings::validate() const
 {
+    if (integrationMode < FixedRadius || integrationMode > AdaptiveCutoff)
+        throw std::runtime_error("Invalid integration mode");
     if (width <= 0 || height <= 0 || width > 8192 || height > 8192 || samples <= 0 || samples > 1000000 ||
         !(exposure > 0) || !std::isfinite(exposure) || !(relativeTolerance > 0) || !(absoluteTolerance > 0) ||
         !(maxStep > 0) || maxStep > 0.05f || !std::isfinite(relativeTolerance) ||
@@ -111,16 +113,11 @@ void SceneData::validate() const
             throw std::runtime_error("Invalid sphere");
 
         if (materials[s.material.x].kindTexture.x == Schwarzschild)
-        {
             ++fields;
-
-            if (s.centerRadius.w <= 1)
-                throw std::runtime_error("Gravity region must exceed horizon radius 1");
-        }
     }
 
     if (fields > 1)
-        throw std::runtime_error("Only one Schwarzschild gravity region is supported");
+        throw std::runtime_error("Only one Schwarzschild black hole is supported");
 
     for (auto m : materials)
     {

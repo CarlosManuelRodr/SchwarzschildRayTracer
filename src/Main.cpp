@@ -147,6 +147,16 @@ int main(int argc, char** argv)
                 mode = arg;
             else if (arg == "--no-redshift")
                 settings.redshift = false;
+            else if (arg == "--full-scene-integration" || arg == "--adaptative")
+            {
+                auto requested = arg == "--adaptative" ? rt::RenderSettings::AdaptiveCutoff
+                                                       : rt::RenderSettings::FullScene;
+                if (settings.integrationMode != rt::RenderSettings::FixedRadius &&
+                    settings.integrationMode != requested)
+                    throw std::runtime_error(
+                        "Choose either --full-scene-integration or --adaptative, not both");
+                settings.integrationMode = requested;
+            }
             else if (arg == "--exposure")
             {
                 if (++i >= argc)
@@ -188,7 +198,8 @@ int main(int argc, char** argv)
                     << "SchwarzschildRayTracer [--width N --height N --samples N --seed N --assets DIR]\n"
                     << "  --test-cpu | --test-gpu | --benchmark | --render\n"
                     << "  --exposure N | --no-redshift\n"
-                    << "Arrows/Q/E move; WASD aim; P saves current image; Escape exits.\n";
+                    << "  --full-scene-integration | --adaptative (default: fixed radius)\n"
+                    << "Left-drag looks; arrows/WASD move; Q/E rise/descend; P saves; Escape exits.\n";
                 return 0;
             }
             else
@@ -196,6 +207,11 @@ int main(int argc, char** argv)
         }
 
         settings.validate();
+        const char* integrationName =
+            settings.integrationMode == rt::RenderSettings::FixedRadius ? "fixed radius"
+            : settings.integrationMode == rt::RenderSettings::FullScene ? "full scene"
+                                                                        : "adaptive cutoff";
+        std::cout << "Integration: " << integrationName << std::endl;
 
         if (mode == "--test-cpu")
             return rt::runCpuTests();
@@ -434,9 +450,9 @@ int main(int argc, char** argv)
             {
                 const auto& p = renderer.progress();
                 std::ostringstream title;
-                title << "Schwarzschild | " << std::fixed << std::setprecision(1) << p.meanSamples << "/"
-                      << activeSettings.samples << " spp | " << activeSettings.width << "x"
-                      << activeSettings.height << (preview ? " preview" : " refine") << " | GPU "
+                title << "Schwarzschild | " << integrationName << " | " << std::fixed << std::setprecision(1)
+                      << p.meanSamples << "/" << activeSettings.samples << " spp | " << activeSettings.width
+                      << "x" << activeSettings.height << (preview ? " preview" : " refine") << " | GPU "
                       << p.lastBatchMilliseconds << " ms | invalid " << p.failures << " | "
                       << renderer.device();
                 window.setTitle(title.str());

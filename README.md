@@ -66,6 +66,26 @@ cmake --build build --config Release
 ```
 
 En Linux, usa `./build/SchwarzschildRayTracer` con las mismas opciones.
+
+Modos de integración (excluyentes; también funcionan con `--render` y `--benchmark`):
+
+| Opción | Comportamiento |
+| --- | --- |
+| Sin opción adicional | **Predeterminado:** radio fijo 5.5, rayos rectos fuera e integración dentro, como antes |
+| `--full-scene-integration` | Integración continua desde la cámara hasta los objetos/fondo |
+| `--adaptative` | Corte según error estimado por trayectoria; integra cuando no puede omitir la curvatura con la tolerancia configurada |
+
+La consola y el título muestran el modo activo. Combinar los dos flags produce
+un error explícito. Las vistas previas de navegación conservan el modo elegido.
+En `--adaptative`, se estima la aceleración máxima dentro de un tubo alrededor
+del segmento recto hasta el siguiente objeto, disco o fondo. Se acepta el tramo
+recto si los límites estimados de desplazamiento y cambio de dirección satisfacen
+`absoluteTolerance` y `relativeTolerance` de `RenderSettings` (1e-6 y 1e-4).
+No se omiten tramos que pasan a menos de tres radios de horizonte. Es una
+aproximación conservadora por tramo entre superficies, no una garantía de error
+final por píxel ni de visibilidad idéntica en siluetas rasantes. Puede costar tanto
+como la integración completa cuando no logra descartar suficiente curvatura.
+
 `--exposure N` controla la exposición lineal (positivo; 1 por defecto).
 `--no-redshift` desactiva los cambios gravitatorios y Doppler para comparar.
 `--render` guarda un render GPU en `Output/render-gpu.png` y termina, sin ejecutar
@@ -133,17 +153,25 @@ macOS no está soportado por este backend OpenGL 4.3.
   (float) y la referencia CPU (double). El RNG es independiente por píxel/muestra
   y reproducible con una semilla fija. La CPU de referencia usa todos los núcleos,
   sin el generador aleatorio global compartido del código anterior.
-- Se conserva **una región gravitatoria esférica finita** de radio 5.5 alrededor
-  del agujero negro y un horizonte de radio 1. Fuera de la región, los rayos son
-  rectos. Es una aproximación, no una integración de geodésicas en toda la escena.
-- Dentro de la región, `r = posición - centro` y `h² = |r × velocidad|²` dan
+- Con `--full-scene-integration`, la gravedad actúa **en toda la escena**, desde la cámara hasta la superficie o
+  el fondo, con un horizonte de radio 1. El radio histórico 5.5 del registro
+  Schwarzschild no interviene en las trayectorias de este modo; no hay transición a rayos
+  rectos. Se sigue admitiendo un único agujero negro sin rotación.
+- `r = posición - centro` y `h² = |r × velocidad|²` dan
   `aceleración = -1.5 h² r / |r|⁵`. La integración RK4 adaptativa compara un paso
   completo con dos medios pasos: tolerancia relativa `1e-4`, absoluta `1e-6`, paso
-  máximo `0.05`. La velocidad no se normaliza entre pasos. Los cruces de horizonte,
-  superficies y límite exterior se detectan sobre el segmento de cada paso
-  aceptado; su localización converge al reducir el paso.
-- Se admiten cámaras dentro de la región y objetos interceptados durante la
-  integración. Se limitan las trayectorias a 50 interacciones y cada recorrido
+  base `0.05`. En modo fijo, este valor es el máximo absoluto dentro de la región.
+  En los otros modos, el límite crece suavemente como `max(1, r²/9)` lejos del agujero,
+  acotado además por distancia radial, proximidad a superficies, espesor atmosférico
+  y error de curvatura del segmento. La velocidad no se normaliza entre pasos.
+  Los cruces de horizonte y superficies se detectan sobre segmentos aceptados;
+  su localización converge al reducir el paso y las tolerancias.
+- La esfera de fondo estelar (radio 200 en la escena inicial) termina los rayos
+  como superficie emisiva. En escenas de prueba sin fondo envolvente, el cielo
+  procedural se evalúa al salir de una esfera que contiene los objetos (radio
+  mínimo 10); no es una continuación rectilínea ni una solución hasta el infinito.
+- Se admiten objetos interceptados durante toda la integración. Se limitan las
+  trayectorias a 50 interacciones y cada tramo entre dispersiones
   gravitatorio a 16,384 intentos. Agotar el presupuesto o producir valores no
   finitos termina el rayo negro y aumenta el diagnóstico; capturarlo por el
   horizonte es un resultado normal. Las órbitas casi críticas pueden necesitar
@@ -176,8 +204,8 @@ otra vez un factor bolométrico. La conversión de Planck a RGB integra el espec
 visible usando las [aproximaciones CIE de Wyman, Sloan y Shirley](https://jcgt.org/published/0002/02/01/paper.pdf),
 en una tabla compartida por CPU/GPU. Para fuentes RGB sin espectro se usa la
 aproximación bolométrica `g⁴`, que cambia intensidad pero no reconstruye colores
-espectrales. El redshift se evalúa también fuera de la región de integración:
-es una aproximación híbrida explícita, ya que allí la geometría sigue siendo recta.
+espectrales. El redshift se evalúa en toda la escena en los tres modos; la
+integración geométrica sigue la opción elegida.
 
 El Sol emite como cuerpo negro de 5778 K con oscurecimiento hacia el limbo.
 La Tierra recibe iluminación directa del Sol y del disco mediante muestreo de
@@ -229,6 +257,24 @@ la misma escena, semilla y parámetros físicos. Guarda `benchmark-gpu.png` y
 `benchmark-cpu.png` en `Output/`; informa RMSE y rayos inválidos. La CPU usa double
 y la GPU float: la aceleración medida incluye esa diferencia de precisión.
 Las mediciones excluyen compilación inicial, carga de recursos y codificación PNG.
+
+Comparación local del 9 de septiembre de 2026, Release, RTX 4070 Laptop GPU,
+con presentación de pasadas completas en ambas versiones:
+
+| 800×600, 30 muestras | Corte a radio 5.5 | Integración en toda la escena |
+| --- | ---: | ---: |
+| Cómputo GPU | 0.970 s | 2.420 s |
+| Finalización GPU incluyendo lectura | 1.047 s | 2.508 s |
+| Mayor lote GPU | 40.79 ms | 130.54 ms |
+| Rayos inválidos GPU | 0 | 0 |
+
+La nueva vista previa de 200×150 y una muestra tardó 54 ms incluyendo lectura,
+con un lote máximo de 16.52 ms. Son tiempos de render sin presentación/VSync,
+no una garantía de latencia interactiva. La comparación CPU/GPU a 30 muestras
+dio RMSE RGB lineal 0.005835 y cero rayos inválidos en ambas rutas. Se verifican
+además independencia respecto al radio antiguo, curvatura exterior y continuidad
+al cruzar 5.5. Las conexiones directas de luz/sombra conservan la aproximación
+rectilínea descrita arriba.
 
 Medición histórica anterior a la presentación de pasadas completas y prioridad
 de primera muestra, Release con disco, redshift y nueva iluminación, Windows,

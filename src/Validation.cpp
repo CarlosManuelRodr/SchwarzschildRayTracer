@@ -107,6 +107,8 @@ int runCpuTests()
             "Pitch clamping must preserve focus distance and a valid basis");
 
     RenderSettings settings;
+    require(settings.integrationMode == RenderSettings::FixedRadius, "Fixed radius must be the default");
+    settings.integrationMode = RenderSettings::FullScene;
     auto field = fieldScene();
     field.validate();
     require(traceCpu(field, settings, {0, 0, 4}, {0, 0, -1}).status == 3, "Radial ray must be captured");
@@ -117,6 +119,42 @@ int runCpuTests()
             "Radial escape must remain straight");
     Vec3 origin{-7, 2.8, 0}, direction{1, 0, 0}, translation{3, -2, 5};
     auto original = traceCpu(field, settings, origin, direction);
+    auto changedRadius = field;
+    changedRadius.spheres[0].centerRadius.w = 50;
+    auto withoutCutoff = traceCpu(changedRadius, settings, origin, direction);
+    require(original.status == withoutCutoff.status &&
+                distance(original.direction, withoutCutoff.direction) == 0 &&
+                distance(original.position, withoutCutoff.position) == 0,
+            "Legacy gravity radius must not affect trajectories");
+    auto distant = traceCpu(field, settings, {8, 0, 0}, {0, 0, 1});
+    require(distant.status == 1 && distant.direction.x < -0.001,
+            "Rays entirely outside the old gravity region must still bend");
+    auto fixed = settings;
+    fixed.integrationMode = RenderSettings::FixedRadius;
+    require(distance(traceCpu(field, fixed, {8, 0, 0}, {0, 0, 1}).direction, {0, 0, 1}) == 0,
+            "Default mode must retain straight rays outside the fixed region");
+    auto adaptive = settings;
+    adaptive.integrationMode = RenderSettings::AdaptiveCutoff;
+    auto radialAdaptive = traceCpu(field, adaptive, {4, 0, 0}, {1, 0, 0});
+    auto radialFull = traceCpu(field, settings, {4, 0, 0}, {1, 0, 0});
+    require(radialAdaptive.status == radialFull.status && radialAdaptive.attempts < radialFull.attempts &&
+                distance(radialAdaptive.direction, radialFull.direction) < 1e-12,
+            "Adaptive mode must skip negligible bending without changing radial escape");
+    require(traceCpu(field, adaptive, {4, 0, 0}, {-1, 0, 0}).status == 3,
+            "Adaptive cutoff must not bypass horizon capture");
+    auto tightAdaptive = adaptive;
+    tightAdaptive.relativeTolerance = 1e-9f;
+    tightAdaptive.absoluteTolerance = 1e-11f;
+    auto weak = traceCpu(field, adaptive, {4, 0, 0}, {1, 0.001, 0});
+    auto tightWeak = traceCpu(field, tightAdaptive, {4, 0, 0}, {1, 0.001, 0});
+    require(weak.status == tightWeak.status && weak.attempts < tightWeak.attempts &&
+                distance(weak.direction, tightWeak.direction) < adaptive.relativeTolerance,
+            "Tighter cutoff tolerance must resolve previously skipped weak bending");
+    auto justInside = traceCpu(field, settings, {5.4999, 0, 0}, {-0.2, 0, 1});
+    auto justOutside = traceCpu(field, settings, {5.5001, 0, 0}, {-0.2, 0, 1});
+    require(justInside.status == justOutside.status &&
+                distance(justInside.direction, justOutside.direction) < 0.001,
+            "Crossing the legacy radius must not introduce a lensing discontinuity");
     auto translated = traceCpu(fieldScene(translation), settings, origin + translation, direction);
     require(original.status == translated.status &&
                 distance(original.direction, translated.direction) < 1e-8 &&
@@ -180,6 +218,7 @@ int runGpuTests(const std::filesystem::path& assets)
     runCpuTests();
     GpuRenderer gpu(assets);
     RenderSettings settings;
+    settings.integrationMode = RenderSettings::FullScene;
     std::cout << "Testing GPU: " << gpu.device() << std::endl;
     auto fit = gpu.fitResolution(16000, 9000);
     require(fit[0] > 0 && fit[1] > 0 && fit[0] <= 8192 && fit[1] <= 8192 &&
@@ -195,6 +234,30 @@ int runGpuTests(const std::filesystem::path& assets)
                                              {Vec3(-7, 2.5, 0), Vec3(1, 0, 0)}};
     auto field = fieldScene();
     auto results = gpu.traceRays(field, settings, rays);
+    for (auto mode : {RenderSettings::FixedRadius, RenderSettings::AdaptiveCutoff})
+    {
+        auto modeSettings = settings;
+        modeSettings.integrationMode = mode;
+        auto modeResults = gpu.traceRays(field, modeSettings, rays);
+        for (std::size_t i = 0; i < rays.size(); ++i)
+        {
+            auto reference = traceCpu(field, modeSettings, rays[i][0], rays[i][1]);
+            require(modeResults[i].status == reference.status &&
+                        distance(modeResults[i].direction, reference.direction) < 0.005,
+                    "Integration modes must agree between CPU and GPU");
+            if (mode == RenderSettings::AdaptiveCutoff)
+                require(modeResults[i].status == results[i].status &&
+                            distance(modeResults[i].direction, results[i].direction) < 0.005,
+                        "Adaptive cutoff must preserve full-scene capture and deflection");
+        }
+    }
+    auto differentRadius = field;
+    differentRadius.spheres[0].centerRadius.w = 50;
+    auto radiusResults = gpu.traceRays(differentRadius, settings, rays);
+    for (std::size_t i = 0; i < results.size(); ++i)
+        require(results[i].status == radiusResults[i].status &&
+                    distance(results[i].direction, radiusResults[i].direction) == 0,
+                "GPU trajectory must be independent of the legacy gravity radius");
 
     for (std::size_t i = 0; i < rays.size(); ++i)
     {
@@ -367,6 +430,17 @@ int runGpuTests(const std::filesystem::path& assets)
             "Displayed export must preserve the previous image across resize");
     std::filesystem::remove(path);
     bool missing = false;
+
+    for (auto mode : {RenderSettings::FixedRadius, RenderSettings::AdaptiveCutoff})
+    {
+        settings.integrationMode = mode;
+        gpu.reset(settings, camera);
+        waitFor(gpu);
+        auto modeImage = gpu.readback();
+        require(gpu.progress().failures == 0 &&
+                    imageRmse(modeImage, renderCpu(scene, settings, camera)) < 0.06,
+                "Mode render must be finite and agree with the CPU reference");
+    }
 
     try
     {

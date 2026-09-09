@@ -147,6 +147,14 @@ struct SceneData
 
 struct RenderSettings
 {
+    enum IntegrationMode
+    {
+        FixedRadius,
+        FullScene,
+        AdaptiveCutoff
+    };
+
+    IntegrationMode integrationMode = FixedRadius;
     int width = 800;
     int height = 600;
     int samples = 30;
@@ -156,7 +164,7 @@ struct RenderSettings
 
     float relativeTolerance = 1e-4f;
     float absoluteTolerance = 1e-6f;
-    float maxStep = 0.05f;
+    float maxStep = 0.05f; // Near-hole step scale; grows smoothly with squared radius beyond r=3.
     int maxIntegrationAttempts = 16384;
 
     void validate() const;

@@ -337,6 +337,7 @@ void GpuRenderer::reset(const RenderSettings& settings, const CameraData& camera
     g.integer("testMode", 0);
     g.integer("maxAttempts", settings.maxIntegrationAttempts);
     g.integer("useRedshift", settings.redshift ? 1 : 0);
+    g.integer("gravityMode", int(settings.integrationMode));
 
     glUniform1f(glGetUniformLocation(g.trace, "relTolerance"), settings.relativeTolerance);
     glUniform1f(glGetUniformLocation(g.trace, "absTolerance"), settings.absoluteTolerance);

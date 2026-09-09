@@ -292,6 +292,43 @@ void rk4(vec3 p, vec3 v, real dt, vec3 center, real h2, OUT(vec3) p1, OUT(vec3) 
     v1 = v + dt / real(6) * (a + real(2) * b + real(2) * c + d);
 }
 
+bool negligibleBending(TraceState s, real backgroundRadius)
+{
+    // Bound acceleration in a tube around the proposed straight segment.
+    // Its radius is half the segment's closest approach to the hole. Accept
+    // only if the displacement bound stays inside that tube and within the
+    // positional/angular tolerances. This is a per-flight weak-field estimate,
+    // not a guarantee of identical visibility at a grazing silhouette.
+    vec3 center = sphereCenter(s.field);
+    real speed = length(s.v);
+    vec3 direction = safeUnit(s.v);
+    real distance = real(0);
+    if (!sphereRoot(s.p, direction, center, backgroundRadius, EPS, real(1e30), distance))
+        return false;
+
+    SurfaceHit hit;
+    if (worldHit(s.p, direction, EPS, distance, true, hit))
+        distance = hit.t;
+    real diskDistance = real(0);
+    if (diskHit(s.p, direction, EPS, distance, diskDistance))
+        distance = diskDistance;
+
+    vec3 relative = s.p - center;
+    real closestT = clamp(-dot(relative, direction), real(0), distance);
+    real closestRadius = length(relative + closestT * direction);
+    if (closestRadius <= real(3) || speed <= real(1e-8))
+        return false;
+
+    real tubeRadius = closestRadius / real(2);
+    real bound = real(1.5) * s.h2 / pow(tubeRadius, real(4));
+    real duration = distance / speed;
+    real displacement = real(0.5) * bound * duration * duration;
+    real directionError = bound * duration / speed;
+    return displacement < tubeRadius &&
+           displacement <= absoluteTolerance() + relativeTolerance() * distance &&
+           directionError <= relativeTolerance();
+}
+
 void integrateField(INOUT(TraceState) s)
 {
     vec3 center = sphereCenter(s.field);
@@ -310,6 +347,59 @@ void integrateField(INOUT(TraceState) s)
         return;
     }
     ++s.attempts;
+    real radius = length(s.p - center);
+    real speed = max(length(s.v), real(1e-8));
+
+    // maxStep is the near-hole step scale. Far away, let steps grow smoothly
+    // with radius, but never cross a large fraction of the radial scale at once.
+    real stepLimit = maximumStep();
+    if (integrationMode() != 0)
+    {
+        stepLimit = min(maximumStep() * max(real(1), radius * radius / real(9)), real(0.1) * radius / speed);
+        real backgroundRadius = real(10);
+        for (int i = 0; i < sphereCount(); ++i)
+        {
+            if (materialKind(sphereMaterial(i)) == 4)
+                continue;
+
+            real surfaceDistance = abs(length(s.p - sphereCenter(i)) - sphereRadius(i));
+            stepLimit = min(stepLimit, max(real(0.005), real(0.25) * surfaceDistance) / speed);
+            backgroundRadius =
+                max(backgroundRadius, length(sphereCenter(i) - center) + sphereRadius(i) + real(1));
+
+            if (materialKind(sphereMaterial(i)) == 5 && surfaceDistance < atmosphereHeight())
+                stepLimit = min(stepLimit, atmosphereHeight() / (real(4) * speed));
+        }
+
+        if (diskEnabled())
+            backgroundRadius = max(backgroundRadius, diskOuter() + real(1));
+
+        if (integrationMode() == 2 && negligibleBending(s, backgroundRadius))
+        {
+            s.field = -2; // The remaining straight flight has passed the error check.
+            s.v = safeUnit(s.v);
+            return;
+        }
+
+        // Scenes with no enclosing environment end on a finite background screen.
+        // Gravity is never disabled and tracing never resumes as a straight ray.
+        if (radius >= backgroundRadius && dot(s.p - center, s.v) > real(0))
+        {
+            s.v = safeUnit(s.v);
+            real sky = real(0.5) * (s.v.y + real(1));
+            s.radiance +=
+                s.throughput * ((real(1) - sky) * vec3(1) + sky * vec3(real(0.5), real(0.7), real(1)));
+            s.status = 1;
+            return;
+        }
+
+        // Bound chord error as well as RK error: accepted segments are also used
+        // for disk/sphere intersections, so a long curved chord must stay accurate.
+        real curvature = length(acceleration(s.p, center, s.h2));
+        real chordTolerance = absoluteTolerance() + relativeTolerance() * max(real(1), radius);
+        stepLimit = min(stepLimit, sqrt(real(8) * chordTolerance / max(curvature, real(1e-20))));
+    }
+    s.step = min(s.step, stepLimit);
     vec3 pf, vf, ph, vh, pn, vn;
     rk4(s.p, s.v, s.step, center, s.h2, pf, vf);
     rk4(s.p, s.v, s.step / real(2), center, s.h2, ph, vh);
@@ -328,9 +418,8 @@ void integrateField(INOUT(TraceState) s)
         return;
     }
 
-    real nextStep =
-        min(maximumStep(),
-            s.step * clamp(real(0.9) * pow(max(error, real(1e-10)), real(-0.2)), real(0.2), real(2)));
+    real nextStep = min(
+        stepLimit, s.step * clamp(real(0.9) * pow(max(error, real(1e-10)), real(-0.2)), real(0.2), real(2)));
 
     if (error > real(1))
     {
@@ -364,8 +453,8 @@ void integrateField(INOUT(TraceState) s)
         eventKind = 4;
     }
 
-    // A boundary point moving inward has a zero entry root; only accept the exit.
-    if (length(pn - center) >= sphereRadius(s.field) && dot(delta, pn - center) > real(0) &&
+    if (integrationMode() == 0 && length(pn - center) >= sphereRadius(s.field) &&
+        dot(delta, pn - center) > real(0) &&
         sphereRoot(s.p, delta, center, sphereRadius(s.field), real(1e-7), eventT, t))
     {
         eventT = t;
@@ -398,11 +487,11 @@ void integrateField(INOUT(TraceState) s)
         s.radiance += s.throughput * diskRadiance(s.p, -s.v, s.observerLapse);
         s.status = 1;
     }
-    else if (eventKind == 3 ||
-             (length(s.p - center) >= sphereRadius(s.field) && dot(s.p - center, s.v) > real(0)))
+    else if (integrationMode() == 0 && (eventKind == 3 || (length(s.p - center) >= sphereRadius(s.field) &&
+                                                           dot(s.p - center, s.v) > real(0))))
     {
         s.v = safeUnit(s.v);
-        s.p = s.p + EPS * s.v;
+        s.p += EPS * s.v;
         s.field = -1;
     }
 }
@@ -428,7 +517,8 @@ void advanceTrace(INOUT(TraceState) s)
 
     for (int i = 0; i < sphereCount(); ++i)
     {
-        if (materialKind(sphereMaterial(i)) == 4 && length(s.p - sphereCenter(i)) < sphereRadius(i))
+        if (s.field != -2 && materialKind(sphereMaterial(i)) == 4 &&
+            (integrationMode() != 0 || length(s.p - sphereCenter(i)) < sphereRadius(i)))
         {
             enterField(s, i);
 
@@ -438,7 +528,7 @@ void advanceTrace(INOUT(TraceState) s)
 
     SurfaceHit hit;
 
-    bool hitWorld = worldHit(s.p, s.v, EPS, real(1e30), false, hit);
+    bool hitWorld = worldHit(s.p, s.v, EPS, real(1e30), integrationMode() != 0, hit);
     real maximum = hitWorld ? hit.t : real(1e30);
     real diskDistance = real(0);
     bool hitDisk = diskHit(s.p, s.v, EPS, maximum, diskDistance);

@@ -183,6 +183,11 @@ real maximumStep()
     return settings->maxStep;
 }
 
+int integrationMode()
+{
+    return int(settings->integrationMode);
+}
+
 real relativeTolerance()
 {
     return settings->relativeTolerance;
