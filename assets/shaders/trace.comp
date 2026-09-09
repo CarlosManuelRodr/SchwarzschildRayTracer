@@ -70,6 +70,7 @@ layout(std430, binding = 5) buffer Counters
     uint activePixels;
     uint failed;
     uint completed;
+    uint missingFirstSample;
 };
 
 layout(std430, binding = 6) readonly buffer TestRays
@@ -80,6 +81,7 @@ layout(std430, binding = 6) readonly buffer TestRays
 layout(rgba32f, binding = 0) uniform image2D accumulation;
 uniform ivec2 dimensions;
 uniform int targetSamples, resetState, testMode;
+uniform int firstPassOnly;
 uniform uint seed;
 uniform vec3 cameraOrigin, cameraCorner, cameraHorizontal, cameraVertical;
 uniform float relTolerance, absTolerance, maxStep;
@@ -288,7 +290,7 @@ void main()
 
     for (int work = 0; work < 64; ++work)
     {
-        if (int(sum.w) >= targetSamples)
+        if (int(sum.w) >= targetSamples || (firstPassOnly != 0 && sum.w >= 1.0))
             break;
 
         if (s.status == -1)
@@ -335,4 +337,6 @@ void main()
     if (int(sum.w) < targetSamples)
         atomicAdd(activePixels, 1u);
     atomicAdd(completed, uint(sum.w));
+    if (sum.w < 1.0)
+        atomicAdd(missingFirstSample, 1u);
 }

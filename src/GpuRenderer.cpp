@@ -119,6 +119,8 @@ struct GpuRenderer::Impl
     GLuint display = 0;
     GLuint vao = 0;
     GLuint texture = 0;
+    GLuint displayedTexture = 0;
+    RenderSettings displayedSettings;
     GLuint buffers[7]{};
     GLuint query = 0;
 
@@ -146,6 +148,7 @@ struct GpuRenderer::Impl
         glDeleteQueries(1, &query);
         glDeleteBuffers(7, buffers);
         glDeleteTextures(1, &texture);
+        glDeleteTextures(1, &displayedTexture);
         glDeleteVertexArrays(1, &vao);
 
         if (trace)
@@ -325,6 +328,7 @@ void GpuRenderer::reset(const RenderSettings& settings, const CameraData& camera
     g.settings = settings;
     g.stats = {};
     g.resetPending = true;
+    g.hasImage = false;
 
     glUseProgram(g.trace);
     glUniform2i(glGetUniformLocation(g.trace, "dimensions"), settings.width, settings.height);
@@ -365,7 +369,7 @@ bool GpuRenderer::poll()
     GLuint64 ns = 0;
     glGetQueryObjectui64v(g.query, GL_QUERY_RESULT, &ns);
 
-    std::uint32_t counters[3]{};
+    std::uint32_t counters[4]{};
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, g.buffers[5]);
     glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(counters), counters);
 
@@ -375,7 +379,43 @@ bool GpuRenderer::poll()
     g.stats.failures += counters[1];
     g.stats.meanSamples = double(counters[2]) / (double(g.settings.width) * g.settings.height);
     g.stats.finished = counters[0] == 0;
+    g.stats.firstPassComplete = counters[3] == 0;
     g.hasImage = true;
+
+    // Keep the last coherent image visible across camera resets and resizes.
+    // Never publish the black placeholders of an unfinished first pass.
+    if (g.stats.firstPassComplete)
+    {
+        if (!g.displayedTexture || g.displayedSettings.width != g.settings.width ||
+            g.displayedSettings.height != g.settings.height)
+        {
+            glDeleteTextures(1, &g.displayedTexture);
+            glGenTextures(1, &g.displayedTexture);
+            glBindTexture(GL_TEXTURE_2D, g.displayedTexture);
+            glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA32F, g.settings.width, g.settings.height);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+
+        glCopyImageSubData(g.texture,
+                           GL_TEXTURE_2D,
+                           0,
+                           0,
+                           0,
+                           0,
+                           g.displayedTexture,
+                           GL_TEXTURE_2D,
+                           0,
+                           0,
+                           0,
+                           0,
+                           g.settings.width,
+                           g.settings.height,
+                           1);
+        g.displayedSettings = g.settings;
+    }
     checkGl("GPU completion");
 
     return true;
@@ -396,6 +436,7 @@ bool GpuRenderer::dispatch()
 
     glUseProgram(g.trace);
     g.integer("resetState", g.resetPending ? 1 : 0);
+    g.integer("firstPassOnly", g.stats.firstPassComplete ? 0 : 1);
 
     glBeginQuery(GL_TIME_ELAPSED, g.query);
     glDispatchCompute(GLuint((g.settings.width + 7) / 8), GLuint((g.settings.height + 7) / 8), 1);
@@ -422,15 +463,36 @@ void GpuRenderer::present(int width, int height)
     glClearColor(0, 0, 0, 1);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    if (!g.hasImage)
+    if (!g.displayedTexture)
         return;
     glUseProgram(g.display);
-    glUniform1f(glGetUniformLocation(g.display, "exposure"), g.settings.exposure);
+    glUniform1f(glGetUniformLocation(g.display, "exposure"), g.displayedSettings.exposure);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, g.texture);
+    glBindTexture(GL_TEXTURE_2D, g.displayedTexture);
     glUniform1i(glGetUniformLocation(g.display, "accumulation"), 0);
     glBindVertexArray(g.vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
+}
+
+void GpuRenderer::saveDisplayed(const std::filesystem::path& path)
+{
+    auto& g = *impl;
+    if (!g.displayedTexture)
+        throw std::runtime_error("The first image is still rendering");
+
+    const auto& settings = g.displayedSettings;
+    std::vector<Float4> pixels(std::size_t(settings.width) * settings.height);
+    glBindTexture(GL_TEXTURE_2D, g.displayedTexture);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, pixels.data());
+    for (auto& pixel : pixels)
+    {
+        pixel.x /= pixel.w;
+        pixel.y /= pixel.w;
+        pixel.z /= pixel.w;
+    }
+
+    checkGl("Displayed image readback");
+    savePng(path, settings.width, settings.height, pixels, settings.exposure);
 }
 
 std::vector<Float4> GpuRenderer::readback()

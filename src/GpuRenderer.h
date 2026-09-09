@@ -9,6 +9,7 @@ struct GpuProgress
     double meanSamples = 0, lastBatchMilliseconds = 0, maxBatchMilliseconds = 0, totalGpuMilliseconds = 0;
     std::uint64_t failures = 0;
     bool finished = false;
+    bool firstPassComplete = false;
 };
 
 class GpuRenderer
@@ -24,6 +25,7 @@ class GpuRenderer
     bool dispatch(); // Nonblocking; at most one bounded batch in flight.
     bool poll();
     void present(int width, int height);
+    void saveDisplayed(const std::filesystem::path& path);
     std::vector<Float4> readback(); // Completed samples, bottom row first.
     std::vector<RayResult> traceRays(const SceneData&,
                                      const RenderSettings&,

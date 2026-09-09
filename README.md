@@ -80,12 +80,21 @@ el benchmark CPU. La ventana interactiva conserva la exportación manual con P.
 | P | Guardar las muestras disponibles como PNG en `Output/`, junto al ejecutable |
 | Escape | Salir |
 
-Cada cambio de cámara o tamaño reinicia la acumulación. La imagen se refina hasta
-el objetivo de muestras (30 por defecto); no se guardan imágenes automáticamente.
-La barra de título muestra GPU, promedio de muestras por píxel, tiempo del último
-lote GPU y número de rayos inválidos. Los píxeles avanzan independientemente;
-algunos pueden terminar antes que otros. Mientras se mueve la cámara se ve una
-imagen incompleta que se refina al detenerse.
+Durante la navegación se calculan vistas previas de una muestra a un cuarto del
+ancho y alto de render (200×150 para una ventana de 800×600). Solo se muestran al
+terminar todos sus píxeles; mientras tanto permanece la última imagen completa.
+Cada vista previa termina antes de recoger la posición más reciente de la cámara,
+evitando que el movimiento continuo cancele siempre los rayos lentos.
+Después de 150 ms sin movimiento, al terminar la vista previa en curso, se vuelve
+a resolución completa y al objetivo de muestras (30 por defecto). La primera
+pasada completa también se exige antes de sustituir la vista previa. Los píxeles
+rápidos esperan a los lentos antes de empezar la segunda muestra; después se
+refina progresivamente. Esto elimina el falso crecimiento de la sombra provocado
+por píxeles sin calcular, a cambio de la latencia de una pasada completa.
+La barra de título indica `preview` o `refine`, resolución de trabajo, promedio de
+muestras, tiempo del último lote GPU y rayos inválidos. P exporta la imagen
+completa mostrada, con su resolución y exposición, incluso mientras se calcula
+otra vista. No se guardan imágenes automáticamente en modo interactivo.
 La rotación conserva la posición de la cámara y limita la inclinación a ±89°
 para evitar giros invertidos. Arrastrar termina al soltar el botón, salir de la
 ventana, cambiar su tamaño o perder el foco. WASD y las flechas son equivalentes;
@@ -221,7 +230,8 @@ la misma escena, semilla y parámetros físicos. Guarda `benchmark-gpu.png` y
 y la GPU float: la aceleración medida incluye esa diferencia de precisión.
 Las mediciones excluyen compilación inicial, carga de recursos y codificación PNG.
 
-Medición local Release con disco, redshift y nueva iluminación, Windows,
+Medición histórica anterior a la presentación de pasadas completas y prioridad
+de primera muestra, Release con disco, redshift y nueva iluminación, Windows,
 RTX 4070 Laptop GPU (8 de septiembre de 2026):
 
 | Medida, 800×600, 30 muestras | Resultado |

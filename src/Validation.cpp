@@ -301,6 +301,29 @@ int runGpuTests(const std::filesystem::path& assets)
                 std::abs(int(screen[2]) - int(encodeSrgb(center.z))) <= 1,
             "Display shader gamma/presentation mismatch");
     gpu.reset(settings, CameraData{});
+    auto firstPassDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    bool sawIncompletePass = false;
+    while (!gpu.progress().firstPassComplete)
+    {
+        gpu.dispatch();
+        auto partial = gpu.readback();
+        for (auto pixel : partial)
+            require(pixel.w <= 1, "Extra samples must wait for the complete first pass");
+
+        if (!gpu.progress().firstPassComplete)
+        {
+            sawIncompletePass = true;
+            gpu.present(1, 1);
+            unsigned char retained[4]{};
+            glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, retained);
+            require(std::equal(std::begin(screen), std::end(screen), std::begin(retained)),
+                    "Incomplete first pass must preserve the displayed image");
+        }
+        require(std::chrono::steady_clock::now() < firstPassDeadline, "First pass did not complete");
+    }
+    require(sawIncompletePass, "First-pass test must exercise unfinished trajectories");
+    for (auto pixel : gpu.readback())
+        require(pixel.w == 1, "Complete first pass must cover every pixel exactly once");
     waitFor(gpu);
     require(imageRmse(first, gpu.readback()) == 0, "GPU fixed seed must be repeatable after reset");
     auto camera = CameraData{};
@@ -329,6 +352,20 @@ int runGpuTests(const std::filesystem::path& assets)
     auto bright = encodeSrgb(toneMap(1));
     require(png.getPixel(0, 0) == sf::Color(0, 0, bright) && png.getPixel(0, 1) == sf::Color(bright, 0, 0),
             "PNG orientation/color wrong");
+
+    // A resize must not replace the displayed image or change its export dimensions.
+    settings.width = 16;
+    settings.height = 12;
+    gpu.reset(settings, camera);
+    gpu.saveDisplayed(path);
+    require(png.loadFromFile(path.string()) && png.getSize() == sf::Vector2u(37, 23),
+            "Export must retain displayed dimensions while the next view is pending");
+    auto displayedCorner = displayColor(resized, 37, 23, 0, 22, settings.exposure);
+    require(png.getPixel(0, 0) == sf::Color(encodeSrgb(displayedCorner.x),
+                                            encodeSrgb(displayedCorner.y),
+                                            encodeSrgb(displayedCorner.z)),
+            "Displayed export must preserve the previous image across resize");
+    std::filesystem::remove(path);
     bool missing = false;
 
     try

@@ -234,6 +234,9 @@ int main(int argc, char** argv)
         sf::Vector2i mousePosition;
         constexpr double mouseSensitivity = 0.004;
         auto last = Clock::now(), titleTime = last;
+        auto lastMovement = last;
+        bool preview = false, cameraPending = false;
+        auto activeSettings = settings;
 
         while (running)
         {
@@ -344,13 +347,9 @@ int main(int argc, char** argv)
                         auto path =
                             executableDirectory() / "Output" / ("img-" + std::to_string(stamp) + ".png");
 
-                        if (!reset && !minimized)
+                        if (!minimized)
                         {
-                            rt::savePng(path,
-                                        settings.width,
-                                        settings.height,
-                                        renderer.readback(),
-                                        settings.exposure);
+                            renderer.saveDisplayed(path);
                             std::cout << "Saved " << path << std::endl;
                         }
                     }
@@ -386,20 +385,40 @@ int main(int argc, char** argv)
                 }
             }
 
+            if (reset)
+            {
+                cameraPending = true;
+                lastMovement = now;
+            }
+
             if (minimized)
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
 
-            if (reset)
+            if (renderer.poll() && renderer.progress().firstPassComplete)
+                redraw = true;
+
+            // Finish each preview even if newer input arrives. Otherwise a held
+            // key would continually cancel the slow rays and no preview would finish.
+            bool settled = std::chrono::duration<double>(now - lastMovement).count() >= 0.15;
+            bool canReplace = !preview || renderer.progress().finished;
+            if (canReplace && (cameraPending || (preview && settled)))
             {
-                renderer.reset(settings, camera);
+                preview = !settled;
+                activeSettings = settings;
+                if (preview)
+                {
+                    activeSettings.width = std::max(1, settings.width / 4);
+                    activeSettings.height = std::max(1, settings.height / 4);
+                    activeSettings.samples = 1;
+                }
+
+                renderer.reset(activeSettings, camera);
+                cameraPending = false;
                 redraw = true;
             }
-
-            if (renderer.poll())
-                redraw = true;
 
             if (redraw)
             {
@@ -416,8 +435,9 @@ int main(int argc, char** argv)
                 const auto& p = renderer.progress();
                 std::ostringstream title;
                 title << "Schwarzschild | " << std::fixed << std::setprecision(1) << p.meanSamples << "/"
-                      << settings.samples << " spp | " << settings.width << "x" << settings.height
-                      << " | GPU " << p.lastBatchMilliseconds << " ms | invalid " << p.failures << " | "
+                      << activeSettings.samples << " spp | " << activeSettings.width << "x"
+                      << activeSettings.height << (preview ? " preview" : " refine") << " | GPU "
+                      << p.lastBatchMilliseconds << " ms | invalid " << p.failures << " | "
                       << renderer.device();
                 window.setTitle(title.str());
                 titleTime = Clock::now();
