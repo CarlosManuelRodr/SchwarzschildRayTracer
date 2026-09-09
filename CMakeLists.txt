@@ -9,19 +9,26 @@ project(
 
 find_package(SFML 2.6 CONFIG REQUIRED COMPONENTS graphics window system)
 find_package(Threads REQUIRED)
+find_package(OpenGL REQUIRED)
+find_package(GLEW REQUIRED)
 
 add_executable(SchwarzschildRayTracer
     src/Main.cpp
-    src/RandomGen.cpp
+    src/SceneData.cpp
+    src/CpuRenderer.cpp
+    src/GpuRenderer.cpp
+    src/Validation.cpp
 )
 
-target_compile_features(SchwarzschildRayTracer PRIVATE cxx_std_11)
+target_compile_features(SchwarzschildRayTracer PRIVATE cxx_std_17)
 target_link_libraries(SchwarzschildRayTracer
     PRIVATE
         sfml-graphics
         sfml-window
         sfml-system
         Threads::Threads
+        OpenGL::GL
+        GLEW::GLEW
 )
 
 if(MSVC)
@@ -31,18 +38,20 @@ else()
     target_compile_options(SchwarzschildRayTracer PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-if(WIN32)
-    target_link_libraries(SchwarzschildRayTracer PRIVATE Shlwapi)
+include(CTest)
+if(BUILD_TESTING)
+    add_test(NAME cpu_reference COMMAND SchwarzschildRayTracer --test-cpu)
+    add_test(NAME gpu_reference COMMAND SchwarzschildRayTracer --test-gpu)
+    set_tests_properties(gpu_reference PROPERTIES LABELS "gpu" TIMEOUT 180)
 endif()
 
-add_custom_command(
-    TARGET SchwarzschildRayTracer
-    POST_BUILD
+add_custom_target(runtime_assets ALL
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/assets"
             "$<TARGET_FILE_DIR:SchwarzschildRayTracer>/assets"
     COMMENT "Copying runtime assets"
 )
+add_dependencies(SchwarzschildRayTracer runtime_assets)
 
 install(TARGETS SchwarzschildRayTracer RUNTIME DESTINATION .)
 install(DIRECTORY assets DESTINATION .)

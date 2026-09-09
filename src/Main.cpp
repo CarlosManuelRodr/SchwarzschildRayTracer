@@ -1,268 +1,161 @@
-#include <iostream>
-#include <fstream>
-#include <vector>
+#include "GpuRenderer.h"
+#include <SFML/Window.hpp>
+#include <algorithm>
+#include <chrono>
 #include <cmath>
-#include <SFML/Graphics.hpp>
-#include "Sphere.h"
-#include "HitableList.h"
-#include "Camera.h"
-#include "RandomGen.h"
-#include "Material.h"
-#include "ThreadPool.h"
-#include "RayTracer.h"
-#include "Filesystem.h"
-#include "ProgressBar.h"
-
-#define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_STATIC
-#include "stb_image.h"
-
-using namespace std;
-
-/**
-* @brief Dibuja una fila de la imagen a construir.
-* @param j Fila a dibujar
-* @param nx Tamaño horizontal de la imagen
-* @param ny Tamaño vertical de la imagen
-* @param ns Rayos por pixel
-* @param world Lista con todos los elementos del mundo
-* @param camera Cámara desde la cual se emiten los rayos
-*/
-vector<sf::Color> render_world_line(int j, int nx, int ny, int ns, const HitableList& world, const Camera& camera)
-{
-    vector<sf::Color> output;
-    for (int i = 0; i < nx; i++)
-    {
-        Vector3 rayColor(0.0, 0.0, 0.0);
-        for (int s = 0; s < ns; s++)
-        {
-            float u = float(i + RandomGen::Getfloat()) / float(nx);
-            float v = float(j + RandomGen::Getfloat()) / float(ny);
-            Ray r = camera.GetRay(u, v);
-            rayColor += ray_trace(r, world);
-        }
-        rayColor /= float(ns);
-        rayColor = Vector3(sqrt(rayColor[0]), sqrt(rayColor[1]), sqrt(rayColor[2]));
-
-        int ir = int(255.99 * rayColor[0]);
-        int ig = int(255.99 * rayColor[1]);
-        int ib = int(255.99 * rayColor[2]);
-        output.push_back(sf::Color(ir, ig, ib));
-    }
-    return output;
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <stdexcept>
+#include <thread>
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+// Driver hints only; Windows/user graphics preferences still take precedence.
+extern "C" {
+__declspec(dllexport) DWORD NvOptimusEnablement=1;
+__declspec(dllexport) int AmdPowerXpressRequestHighPerformance=1;
 }
-
-/**
-* @brief Convierte una matriz de valores RGB a imagen de SFML.
-* @param imageAsBitmap Matriz que contiene colores de los pixeles.
-*/
-sf::Image bitmap_to_image(vector< vector<sf::Color> > imageAsBitmap)
-{
-    int ny = (int) imageAsBitmap.size();
-    int nx = (int) imageAsBitmap.front().size();
-
-    sf::Image output;
-    output.create(nx, ny);
-
-    for (int j = 0; j < ny; j++)
-    {
-        for (int i = 0; i < nx; i++)
-        {
-            output.setPixel(i, ny - j - 1, imageAsBitmap[j][i]);
-        }
-    }
-
-    return output;
-}
-
-/**
-* @brief Dibuja la imagen. Versión multi-thread.
-* @param nx Tamaño horizontal de la imagen
-* @param ny Tamaño vertical de la imagen
-* @param ns Rayos por pixel
-* @param world Lista con todos los elementos del mundo
-* @param camera Cámara desde la cual se emiten los rayos
-*/
-sf::Image render_world_mt(int nx, int ny, int ns, const HitableList& world, const Camera& camera)
-{
-    unsigned int hc = thread::hardware_concurrency();
-
-    ThreadPool pool(hc);
-    vector<future<vector<sf::Color>>> result;
-    vector<vector<sf::Color>> imageAsBitmap;
-
-    for (int j = 0; j < ny; j++)
-        result.push_back(pool.enqueue(render_world_line, j, nx, ny, ns, world, camera));
-
-    for (auto& r : result)
-    {
-        progress_bar((float)(&r - &result[0]), 0.0f, (float) result.size(), 1.0f);
-        imageAsBitmap.push_back(r.get());
-    }
-    progress_bar(1, 0, 1, 1);
-
-    return bitmap_to_image(imageAsBitmap);
-}
-
-/**
-* @brief Dibuja la imagen. Versión single-thread. Se usa en el modo (debug).
-* @param nx Tamaño horizontal de la imagen
-* @param ny Tamaño vertical de la imagen
-* @param ns Rayos por pixel
-* @param world Lista con todos los elementos del mundo
-* @param camera Cámara desde la cual se emiten los rayos
-*/
-sf::Image render_world_st(int nx, int ny, int ns, const HitableList& world, const Camera& camera)
-{
-    vector<vector<sf::Color>> imageAsBitmap;
-
-    for (int j = 0; j < ny; j++)
-        imageAsBitmap.push_back(render_world_line(j, nx, ny, ns, world, camera));
-
-
-    return bitmap_to_image(imageAsBitmap);
-}
-
-int main()
-{
-    RandomGen::Seed();
-    int nx = 800;
-    int ny = 600;
-    int ns = 30;
-
-    // Carga las texturas
-    int earthTextWidth, earthTextHeight, earthTextChannels;
-    const std::string earthTexturePath = filename_join({ "assets", "textures", "earthmap.jpg" });
-    unsigned char *earthTexture = stbi_load(earthTexturePath.c_str(), &earthTextWidth, &earthTextHeight, &earthTextChannels, 0);
-    int skyTextWidth, skyTextHeight, skyTextChannels;
-    const std::string skyTexturePath = filename_join({ "assets", "textures", "starbackground.jpg" });
-    unsigned char* skyTexture = stbi_load(skyTexturePath.c_str(), &skyTextWidth, &skyTextHeight, &skyTextChannels, 0);
-
-    // Inicializa el mundo
-    vector<Hitable*> hitableList;
-    hitableList.push_back(
-        new Sphere(
-            Vector3(7.0f, 0.0f, -1.0f), 1.0f,
-            new Lambertian(new ImageTexture(earthTexture, earthTextWidth, earthTextHeight))
-        )
-    );
-    hitableList.push_back(
-        new Sphere(
-            Vector3(7.0f, 2.5f, -1.0f), 0.5f,
-            new DiffuseLight(new ConstantTexture(Vector3(2.0f, 2.0f, 2.0f)))
-        )
-    );
-    hitableList.push_back(
-        new Sphere(
-            Vector3(0.0f, 0.0f, -1.0f), 5.5f,
-            new Schwarzschild(0.05f)
-        )
-    );
-    hitableList.push_back(
-        new Sphere(
-            Vector3(0.0f, 0.0f, 0.0f), 200.0f,
-            new Lambertian(new ImageTexture(skyTexture, skyTextWidth, skyTextHeight))
-        )
-    );
-    HitableList world(hitableList);
-
-    // Configuración de la cámara
-    Vector3 cameraPosition(4.0f, 7.0f, 3.0f);
-    Vector3 cameraLookAt(4.0f, 0.0f, -1.0f);
-    Camera camera = Camera(cameraPosition, cameraLookAt, Vector3(0.0f, 1.0f, 0.0f), 90.0f, (float) nx / (float) ny);
-
-    // Prepara el directorio de salida
-    create_directory("Output");
-
-    // Inicializa la ventana SFML
-    sf::RenderWindow window(sf::VideoMode(nx, ny), "Ray Tracer");
-    window.setFramerateLimit(10);
-
-    // Inicializa las texturas donde se dibujará la imagen.
-    sf::Texture texture;
-    texture.create(nx, ny);
-    sf::Sprite sprite;
-    sprite.setTexture(texture);
-
-#if defined(_DEBUG)
-    texture.update(render_world_st(nx, ny, ns, world, camera));
 #else
-    texture.update(render_world_mt(nx, ny, ns, world, camera));
+#include <unistd.h>
 #endif
 
-    // Guarda el primer render.
-    texture.copyToImage().saveToFile(filename_join({ "Output", "img0.png" }));
-
-    int renders = 1;
-    const float movementDelta = 0.05f;
-    while (window.isOpen())
-    {
-        sf::Event event;
-        while (window.pollEvent(event))
-        {
-            if (event.type == sf::Event::Closed)
-                window.close();
-            if (event.type == sf::Event::KeyPressed)
-            {
-                // Teclas direccionales
-                if (event.key.code == sf::Keyboard::Right)
-                {
-                    cameraPosition += Vector3(movementDelta, 0.0f, 0.0f);
-                    cameraLookAt += Vector3(movementDelta, 0.0f, 0.0f);
-                }
-                if (event.key.code == sf::Keyboard::Left)
-                {
-                    cameraPosition += Vector3(-movementDelta, 0.0f, 0.0f);
-                    cameraLookAt += Vector3(-movementDelta, 0.0f, 0.0f);
-                }
-                if (event.key.code == sf::Keyboard::Up)
-                {
-                    cameraPosition += Vector3(0.0f, 0.0f, -movementDelta);
-                    cameraLookAt += Vector3(0.0f, 0.0f, -movementDelta);
-                }
-                if (event.key.code == sf::Keyboard::Down)
-                {
-                    cameraPosition += Vector3(0.0f, 0.0f, movementDelta);
-                    cameraLookAt += Vector3(0.0f, 0.0f, movementDelta);
-                }
-                if (event.key.code == sf::Keyboard::Q)
-                {
-                    cameraPosition += Vector3(0.0f, movementDelta, 0.0f);
-                    cameraLookAt += Vector3(0.0f, movementDelta, 0.0f);
-                }
-                if (event.key.code == sf::Keyboard::E)
-                {
-                    cameraPosition += Vector3(0.0f, -movementDelta, 0.0f);
-                    cameraLookAt += Vector3(0.0f, -movementDelta, 0.0f);
-                }
-
-                // WASD
-                if (event.key.code == sf::Keyboard::D)
-                    cameraLookAt += Vector3(movementDelta, 0.0f, 0.0f);
-                if (event.key.code == sf::Keyboard::A)
-                    cameraLookAt += Vector3(-movementDelta, 0.0f, 0.0f);
-                if (event.key.code == sf::Keyboard::W)
-                    cameraLookAt += Vector3(0.0f, 0.0f, -movementDelta);
-                if (event.key.code == sf::Keyboard::S)
-                    cameraLookAt += Vector3(0.0f, 0.0f, movementDelta);
-
-                camera.SetLookFrom(cameraPosition);
-                camera.SetLookAt(cameraLookAt);
-
-            #if defined(_DEBUG)
-                texture.update(render_world_st(nx, ny, ns, world, camera));
-            #else
-                texture.update(render_world_mt(nx, ny, ns, world, camera));
-            #endif
-
-                // Guarda la imagen
-                texture.copyToImage().saveToFile(filename_join({ "Output", "img" + to_string(renders) + ".png" }));
-                renders++;
-            }
-        }
-
-        window.clear();
-        window.draw(sprite);
-        window.display();
+namespace {
+std::filesystem::path executableDirectory() {
+#ifdef _WIN32
+    std::wstring path(32768,L'\0'); auto n=GetModuleFileNameW(nullptr,path.data(),DWORD(path.size()));
+    if(!n||n==path.size()) throw std::runtime_error("Cannot resolve executable path");
+    path.resize(n); return std::filesystem::path(path).parent_path();
+#else
+    std::string path(4096,'\0'); auto n=readlink("/proc/self/exe",path.data(),path.size());
+    if(n<=0||std::size_t(n)==path.size()) throw std::runtime_error("Cannot resolve executable path");
+    path.resize(std::size_t(n)); return std::filesystem::path(path).parent_path();
+#endif
+}
+using Clock=std::chrono::steady_clock;
+double seconds(Clock::time_point start) { return std::chrono::duration<double>(Clock::now()-start).count(); }
+sf::ContextSettings contextSettings() { return sf::ContextSettings(0,0,0,4,3,sf::ContextSettings::Core); }
+void benchmark(const std::filesystem::path& assets,rt::RenderSettings settings) {
+    sf::Context context(contextSettings(),1,1);
+    auto scene=rt::defaultScene(assets); rt::CameraData camera;
+    rt::GpuRenderer gpu(assets); gpu.uploadScene(scene);
+    auto warm=settings; warm.width=32; warm.height=24; warm.samples=1;
+    gpu.reset(warm,camera);
+    while(!gpu.progress().finished) { gpu.poll(); gpu.dispatch(); std::this_thread::yield(); }
+    gpu.reset(settings,camera); auto start=Clock::now();
+    while(!gpu.progress().finished) { gpu.poll(); gpu.dispatch(); std::this_thread::yield(); }
+    auto image=gpu.readback(); double gpuSeconds=seconds(start);
+    std::cout<<"GPU: "<<gpu.device()<<"\n"<<settings.width<<"x"<<settings.height<<", "<<settings.samples<<" samples\n"
+             <<"GPU compute: "<<gpu.progress().totalGpuMilliseconds/1000<<" s\nGPU completion including readback: "<<gpuSeconds
+             <<" s\nLongest GPU batch: "<<gpu.progress().maxBatchMilliseconds<<" ms\nGPU invalid rays: "<<gpu.progress().failures<<std::endl;
+    rt::savePng(executableDirectory()/"Output"/"benchmark-gpu.png",settings.width,settings.height,image);
+    start=Clock::now(); std::uint64_t failures=0;
+    auto cpu=rt::renderCpu(scene,settings,camera,&failures); double cpuSeconds=seconds(start);
+    double squared=0; for(std::size_t i=0;i<image.size();++i) {
+        double x=image[i].x-cpu[i].x,y=image[i].y-cpu[i].y,z=image[i].z-cpu[i].z; squared+=x*x+y*y+z*z;
     }
+    rt::savePng(executableDirectory()/"Output"/"benchmark-cpu.png",settings.width,settings.height,cpu);
+    std::cout<<"CPU reference (double precision, all cores): "<<cpuSeconds<<" s\nCompletion speedup: "<<cpuSeconds/gpuSeconds
+             <<"x\nLinear RGB RMSE: "<<std::sqrt(squared/(3*image.size()))<<"\nCPU invalid rays: "<<failures<<std::endl;
+    if(failures||gpu.progress().failures) throw std::runtime_error("Benchmark encountered invalid rays");
+}
+}
+int main(int argc,char** argv) {
+    try {
+        rt::RenderSettings settings; std::string mode; auto assets=executableDirectory()/"assets";
+        for(int i=1;i<argc;++i) {
+            std::string arg=argv[i];
+            if(arg=="--test-cpu"||arg=="--test-gpu"||arg=="--benchmark") mode=arg;
+            else if(arg=="--width"||arg=="--height"||arg=="--samples"||arg=="--seed"||arg=="--assets") {
+                if(++i>=argc) throw std::runtime_error("Missing value for "+arg);
+                if(arg=="--assets") assets=argv[i];
+                else { std::size_t used=0; int value=std::stoi(argv[i],&used); if(used!=std::string(argv[i]).size()) throw std::runtime_error("Invalid numeric argument");
+                    if(arg=="--width") settings.width=value; else if(arg=="--height") settings.height=value;
+                    else if(arg=="--samples") settings.samples=value; else settings.seed=std::uint32_t(value); }
+            } else if(arg=="--help") {
+                std::cout<<"SchwarzschildRayTracer [--width N --height N --samples N --seed N --assets DIR]\n"
+                         <<"  --test-cpu | --test-gpu | --benchmark\n"
+                         <<"Arrows/Q/E move; WASD aim; P saves current image; Escape exits.\n"; return 0;
+            } else throw std::runtime_error("Unknown option: "+arg);
+        }
+        settings.validate();
+        if(mode=="--test-cpu") return rt::runCpuTests();
+        if(mode=="--test-gpu") { sf::Context context(contextSettings(),1,1); return rt::runGpuTests(assets); }
+        if(mode=="--benchmark") { benchmark(assets,settings); return 0; }
+        auto scene=rt::defaultScene(assets); rt::CameraData camera;
+        sf::Window window(sf::VideoMode(unsigned(settings.width),unsigned(settings.height)),"Schwarzschild GPU",sf::Style::Default,contextSettings());
+        window.setVerticalSyncEnabled(true); window.setKeyRepeatEnabled(false);
+        // Renderer is destroyed before window, while its GL context is still valid.
+        rt::GpuRenderer renderer(assets); renderer.uploadScene(scene); renderer.reset(settings,camera);
+        std::cout<<"GPU: "<<renderer.device()<<"\nP saves the current image; arrows/Q/E move; WASD aim.\n";
+        bool running=true,focused=true,minimized=false,redraw=true; auto last=Clock::now(),titleTime=last;
+        while(running) {
+            bool reset=false,tapped=false; sf::Event event;
+            while(window.pollEvent(event)) {
+                if(event.type==sf::Event::Closed || (event.type==sf::Event::KeyPressed&&event.key.code==sf::Keyboard::Escape)) running=false;
+                if(event.type==sf::Event::LostFocus) focused=false;
+                if(event.type==sf::Event::GainedFocus) focused=true;
+                // Handle quick taps even if the key is released between frame polls.
+                if(event.type==sf::Event::KeyPressed) {
+                    rt::Vec3 movement,aim;
+                    switch(event.key.code) {
+                        case sf::Keyboard::Right: movement.x=1; break;
+                        case sf::Keyboard::Left: movement.x=-1; break;
+                        case sf::Keyboard::Up: movement.z=-1; break;
+                        case sf::Keyboard::Down: movement.z=1; break;
+                        case sf::Keyboard::Q: movement.y=1; break;
+                        case sf::Keyboard::E: movement.y=-1; break;
+                        case sf::Keyboard::D: aim.x=1; break;
+                        case sf::Keyboard::A: aim.x=-1; break;
+                        case sf::Keyboard::W: aim.z=-1; break;
+                        case sf::Keyboard::S: aim.z=1; break;
+                        default: break;
+                    }
+                    if(rt::dot(movement,movement)+rt::dot(aim,aim)>0) {
+                        auto candidate=camera; candidate.position+=0.05*movement; candidate.lookAt+=0.05*(movement+aim);
+                        try { candidate.basis(double(settings.width)/settings.height); camera=candidate; reset=true; tapped=true; } catch(const std::exception&) {}
+                    }
+                }
+                if(event.type==sf::Event::Resized) {
+                    minimized=event.size.width==0||event.size.height==0;
+                    if(!minimized) {
+                        auto size=renderer.fitResolution(int(event.size.width),int(event.size.height));
+                        settings.width=size[0]; settings.height=size[1]; reset=true;
+                    }
+                }
+                if(event.type==sf::Event::KeyPressed&&event.key.code==sf::Keyboard::P) {
+                    try {
+                        auto stamp=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                        auto path=executableDirectory()/"Output"/("img-"+std::to_string(stamp)+".png");
+                        if(!reset&&!minimized) { rt::savePng(path,settings.width,settings.height,renderer.readback()); std::cout<<"Saved "<<path<<std::endl; }
+                    } catch(const std::exception& error) { std::cerr<<"Export failed: "<<error.what()<<std::endl; }
+                }
+            }
+            if(!running) break;
+            auto now=Clock::now(); double dt=std::min(0.05,std::chrono::duration<double>(now-last).count()); last=now;
+            if(focused&&!minimized&&!tapped) {
+                auto key=[](sf::Keyboard::Key k) { return sf::Keyboard::isKeyPressed(k)?1.0:0.0; };
+                rt::Vec3 movement(key(sf::Keyboard::Right)-key(sf::Keyboard::Left),key(sf::Keyboard::Q)-key(sf::Keyboard::E),key(sf::Keyboard::Down)-key(sf::Keyboard::Up));
+                rt::Vec3 aim(key(sf::Keyboard::D)-key(sf::Keyboard::A),0,key(sf::Keyboard::S)-key(sf::Keyboard::W));
+                if(rt::dot(movement,movement)+rt::dot(aim,aim)>0) {
+                    auto candidate=camera; candidate.position+=dt*movement; candidate.lookAt+=dt*(movement+aim);
+                    try { candidate.basis(double(settings.width)/settings.height); camera=candidate; reset=true; } catch(const std::exception&) {}
+                }
+            }
+            if(minimized) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); continue; }
+            if(reset) { renderer.reset(settings,camera); redraw=true; }
+            if(renderer.poll()) redraw=true;
+            if(redraw) { auto size=window.getSize(); renderer.present(int(size.x),int(size.y)); window.display(); redraw=false; }
+            renderer.dispatch();
+            if(seconds(titleTime)>0.25) {
+                const auto& p=renderer.progress(); std::ostringstream title;
+                title<<"Schwarzschild | "<<std::fixed<<std::setprecision(1)<<p.meanSamples<<"/"<<settings.samples
+                     <<" spp | "<<settings.width<<"x"<<settings.height<<" | GPU "<<p.lastBatchMilliseconds
+                     <<" ms | invalid "<<p.failures<<" | "<<renderer.device();
+                window.setTitle(title.str()); titleTime=Clock::now();
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return 0;
+    } catch(const std::exception& error) { std::cerr<<"Error: "<<error.what()<<std::endl; return 1; }
 }
