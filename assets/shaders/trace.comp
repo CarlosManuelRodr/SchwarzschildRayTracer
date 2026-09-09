@@ -2,87 +2,267 @@
 #define real float
 #define INOUT(T) inout T
 #define OUT(T) out T
-layout(local_size_x=8,local_size_y=8) in;
-struct SphereData { vec4 centerRadius; ivec4 material; };
-struct MaterialData { ivec4 kindTexture; vec4 parameters; };
-struct TextureData { ivec4 kindChildren; vec4 color; ivec4 image; };
-struct StoredState { vec4 p; vec4 v; vec4 throughput; vec4 radiance; vec4 integration; ivec4 meta; uvec4 random; };
-struct TestRay { vec4 origin; vec4 direction; };
-layout(std430,binding=0) readonly buffer Spheres { SphereData spheres[]; };
-layout(std430,binding=1) readonly buffer Materials { MaterialData materials[]; };
-layout(std430,binding=2) readonly buffer Textures { TextureData textures[]; };
-layout(std430,binding=3) readonly buffer Texels { vec4 texels[]; };
-layout(std430,binding=4) buffer States { StoredState states[]; };
-layout(std430,binding=5) buffer Counters { uint activePixels; uint failed; uint completed; };
-layout(std430,binding=6) readonly buffer TestRays { TestRay testRays[]; };
-layout(rgba32f,binding=0) uniform image2D accumulation;
+layout(local_size_x = 8, local_size_y = 8) in;
+
+struct SphereData
+{
+    vec4 centerRadius;
+    ivec4 material;
+};
+
+struct MaterialData
+{
+    ivec4 kindTexture;
+    vec4 parameters;
+};
+
+struct TextureData
+{
+    ivec4 kindChildren;
+    vec4 color;
+    ivec4 image;
+};
+
+struct StoredState
+{
+    vec4 p;
+    vec4 v;
+    vec4 throughput;
+    vec4 radiance;
+    vec4 integration;
+    ivec4 meta;
+    uvec4 random;
+};
+
+struct TestRay
+{
+    vec4 origin;
+    vec4 direction;
+};
+
+layout(std430, binding = 0) readonly buffer Spheres
+{
+    SphereData spheres[];
+};
+
+layout(std430, binding = 1) readonly buffer Materials
+{
+    MaterialData materials[];
+};
+
+layout(std430, binding = 2) readonly buffer Textures
+{
+    TextureData textures[];
+};
+
+layout(std430, binding = 3) readonly buffer Texels
+{
+    vec4 texels[];
+};
+
+layout(std430, binding = 4) buffer States
+{
+    StoredState states[];
+};
+
+layout(std430, binding = 5) buffer Counters
+{
+    uint activePixels;
+    uint failed;
+    uint completed;
+};
+
+layout(std430, binding = 6) readonly buffer TestRays
+{
+    TestRay testRays[];
+};
+
+layout(rgba32f, binding = 0) uniform image2D accumulation;
 uniform ivec2 dimensions;
 uniform int targetSamples, resetState, testMode;
 uniform uint seed;
 uniform vec3 cameraOrigin, cameraCorner, cameraHorizontal, cameraVertical;
 uniform float relTolerance, absTolerance, maxStep;
 uniform int maxAttempts;
-int sphereCount() { return spheres.length(); }
-vec3 sphereCenter(int i) { return spheres[i].centerRadius.xyz; }
-real sphereRadius(int i) { return spheres[i].centerRadius.w; }
-int sphereMaterial(int i) { return spheres[i].material.x; }
-int materialKind(int i) { return materials[i].kindTexture.x; }
-int materialTexture(int i) { return materials[i].kindTexture.y; }
-real materialParameter(int i) { return materials[i].parameters.x; }
-int textureKind(int i) { return textures[i].kindChildren.x; }
-int textureChild(int i,bool odd) { return odd?textures[i].kindChildren.y:textures[i].kindChildren.z; }
-vec3 textureColor(int i) { return textures[i].color.xyz; }
-vec3 imageValue(int i,real u,real v) {
-    ivec3 t=textures[i].image.xyz;
-    int x=clamp(int(u*float(t.y)),0,t.y-1),y=clamp(int((1.0-v)*float(t.z)-0.001),0,t.z-1);
-    return texels[t.x+x+y*t.y].xyz;
+
+int sphereCount()
+{
+    return spheres.length();
 }
-real maximumStep() { return maxStep; }
-real relativeTolerance() { return relTolerance; }
-real absoluteTolerance() { return absTolerance; }
-int maximumAttempts() { return maxAttempts; }
-bool finiteScalar(real v) { return !isnan(v)&&!isinf(v); }
+
+vec3 sphereCenter(int i)
+{
+    return spheres[i].centerRadius.xyz;
+}
+
+real sphereRadius(int i)
+{
+    return spheres[i].centerRadius.w;
+}
+
+int sphereMaterial(int i)
+{
+    return spheres[i].material.x;
+}
+
+int materialKind(int i)
+{
+    return materials[i].kindTexture.x;
+}
+
+int materialTexture(int i)
+{
+    return materials[i].kindTexture.y;
+}
+
+real materialParameter(int i)
+{
+    return materials[i].parameters.x;
+}
+
+int textureKind(int i)
+{
+    return textures[i].kindChildren.x;
+}
+
+int textureChild(int i, bool odd)
+{
+    return odd ? textures[i].kindChildren.y : textures[i].kindChildren.z;
+}
+
+vec3 textureColor(int i)
+{
+    return textures[i].color.xyz;
+}
+
+vec3 imageValue(int i, real u, real v)
+{
+    ivec3 t = textures[i].image.xyz;
+    int x = clamp(int(u * float(t.y)), 0, t.y - 1),
+        y = clamp(int((1.0 - v) * float(t.z) - 0.001), 0, t.z - 1);
+    return texels[t.x + x + y * t.y].xyz;
+}
+
+real maximumStep()
+{
+    return maxStep;
+}
+
+real relativeTolerance()
+{
+    return relTolerance;
+}
+
+real absoluteTolerance()
+{
+    return absTolerance;
+}
+
+int maximumAttempts()
+{
+    return maxAttempts;
+}
+
+bool finiteScalar(real v)
+{
+    return !isnan(v) && !isinf(v);
+}
+
 // TRACE_CORE
-TraceState loadState(int i) {
-    StoredState a=states[i]; TraceState s;
-    s.p=a.p.xyz; s.v=a.v.xyz; s.throughput=a.throughput.xyz; s.radiance=a.radiance.xyz;
-    s.h2=a.integration.x; s.step=a.integration.y;
-    s.field=a.meta.x; s.attempts=a.meta.y; s.depth=a.meta.z; s.status=a.meta.w; s.rng=a.random.x;
+TraceState loadState(int i)
+{
+    StoredState a = states[i];
+    TraceState s;
+    s.p = a.p.xyz;
+    s.v = a.v.xyz;
+    s.throughput = a.throughput.xyz;
+    s.radiance = a.radiance.xyz;
+    s.h2 = a.integration.x;
+    s.step = a.integration.y;
+    s.field = a.meta.x;
+    s.attempts = a.meta.y;
+    s.depth = a.meta.z;
+    s.status = a.meta.w;
+    s.rng = a.random.x;
+
     return s;
 }
-void storeState(int i,TraceState s) {
-    states[i].p=vec4(s.p,0); states[i].v=vec4(s.v,0);
-    states[i].throughput=vec4(s.throughput,0); states[i].radiance=vec4(s.radiance,0);
-    states[i].integration=vec4(s.h2,s.step,0,0);
-    states[i].meta=ivec4(s.field,s.attempts,s.depth,s.status); states[i].random=uvec4(s.rng,0,0,0);
+
+void storeState(int i, TraceState s)
+{
+    states[i].p = vec4(s.p, 0);
+    states[i].v = vec4(s.v, 0);
+    states[i].throughput = vec4(s.throughput, 0);
+    states[i].radiance = vec4(s.radiance, 0);
+    states[i].integration = vec4(s.h2, s.step, 0, 0);
+    states[i].meta = ivec4(s.field, s.attempts, s.depth, s.status);
+    states[i].random = uvec4(s.rng, 0, 0, 0);
 }
-void main() {
-    ivec2 pixel=ivec2(gl_GlobalInvocationID.xy);
-    if(any(greaterThanEqual(pixel,dimensions))) return;
-    int index=pixel.y*dimensions.x+pixel.x;
-    vec4 sum; TraceState s;
-    if(resetState!=0) { sum=vec4(0); initTrace(s,vec3(0),vec3(0,0,1),seed); s.status=-1; }
-    else { sum=imageLoad(accumulation,pixel); s=loadState(index); }
-    for(int work=0;work<64;++work) {
-        if(int(sum.w)>=targetSamples) break;
-        if(s.status==-1) {
-            uint rng=hashBits(uint(index)^hashBits(uint(sum.w)+seed));
-            if(testMode!=0) initTrace(s,testRays[index].origin.xyz,testRays[index].direction.xyz,seed);
-            else {
-                float u=(float(pixel.x)+randomValue(rng))/float(dimensions.x);
-                float v=(float(pixel.y)+randomValue(rng))/float(dimensions.y);
-                initTrace(s,cameraOrigin,cameraCorner+u*cameraHorizontal+v*cameraVertical-cameraOrigin,rng);
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+
+    if (any(greaterThanEqual(pixel, dimensions)))
+        return;
+    int index = pixel.y * dimensions.x + pixel.x;
+    vec4 sum;
+    TraceState s;
+
+    if (resetState != 0)
+    {
+        sum = vec4(0);
+        initTrace(s, vec3(0), vec3(0, 0, 1), seed);
+        s.status = -1;
+    }
+    else
+    {
+        sum = imageLoad(accumulation, pixel);
+        s = loadState(index);
+    }
+
+    for (int work = 0; work < 64; ++work)
+    {
+        if (int(sum.w) >= targetSamples)
+            break;
+
+        if (s.status == -1)
+        {
+            uint rng = hashBits(uint(index) ^ hashBits(uint(sum.w) + seed));
+
+            if (testMode != 0)
+                initTrace(s, testRays[index].origin.xyz, testRays[index].direction.xyz, seed);
+            else
+            {
+                float u = (float(pixel.x) + randomValue(rng)) / float(dimensions.x);
+                float v = (float(pixel.y) + randomValue(rng)) / float(dimensions.y);
+                initTrace(s,
+                          cameraOrigin,
+                          cameraCorner + u * cameraHorizontal + v * cameraVertical - cameraOrigin,
+                          rng);
             }
         }
+
         advanceTrace(s);
-        if(s.status>0) {
-            if(!finiteVector(s.radiance)) failTrace(s);
-            if(s.status==2) atomicAdd(failed,1u);
-            sum+=vec4(s.radiance,1);
-            if(testMode==0) s.status=-1;
+
+        if (s.status > 0)
+        {
+            if (!finiteVector(s.radiance))
+                failTrace(s);
+
+            if (s.status == 2)
+                atomicAdd(failed, 1u);
+            sum += vec4(s.radiance, 1);
+
+            if (testMode == 0)
+                s.status = -1;
         }
     }
-    imageStore(accumulation,pixel,sum); storeState(index,s);
-    if(int(sum.w)<targetSamples) atomicAdd(activePixels,1u);
-    atomicAdd(completed,uint(sum.w));
+
+    imageStore(accumulation, pixel, sum);
+    storeState(index, s);
+
+    if (int(sum.w) < targetSamples)
+        atomicAdd(activePixels, 1u);
+    atomicAdd(completed, uint(sum.w));
 }

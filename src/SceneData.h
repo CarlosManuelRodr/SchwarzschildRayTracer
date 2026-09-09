@@ -5,55 +5,158 @@
 #include <string>
 #include <vector>
 
-namespace rt {
-struct Vec3 {
+namespace rt
+{
+struct Vec3
+{
     double x = 0, y = 0, z = 0;
     Vec3() = default;
-    explicit Vec3(double s) : x(s), y(s), z(s) {}
-    Vec3(double a, double b, double c) : x(a), y(b), z(c) {}
+
+    explicit Vec3(double s) : x(s), y(s), z(s)
+    {
+    }
+
+    Vec3(double a, double b, double c) : x(a), y(b), z(c)
+    {
+    }
 };
-inline Vec3 operator+(Vec3 a, Vec3 b) { return {a.x+b.x,a.y+b.y,a.z+b.z}; }
-inline Vec3 operator-(Vec3 a, Vec3 b) { return {a.x-b.x,a.y-b.y,a.z-b.z}; }
-inline Vec3 operator-(Vec3 a) { return {-a.x,-a.y,-a.z}; }
-inline Vec3 operator*(Vec3 a, double b) { return {a.x*b,a.y*b,a.z*b}; }
-inline Vec3 operator*(double b, Vec3 a) { return a*b; }
-inline Vec3 operator*(Vec3 a, Vec3 b) { return {a.x*b.x,a.y*b.y,a.z*b.z}; }
-inline Vec3 operator/(Vec3 a, double b) { return a*(1/b); }
-inline Vec3& operator+=(Vec3& a, Vec3 b) { a=a+b; return a; }
-inline Vec3& operator*=(Vec3& a, Vec3 b) { a=a*b; return a; }
+
+inline Vec3 operator+(Vec3 a, Vec3 b)
+{
+    return {a.x + b.x, a.y + b.y, a.z + b.z};
+}
+
+inline Vec3 operator-(Vec3 a, Vec3 b)
+{
+    return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+
+inline Vec3 operator-(Vec3 a)
+{
+    return {-a.x, -a.y, -a.z};
+}
+
+inline Vec3 operator*(Vec3 a, double b)
+{
+    return {a.x * b, a.y * b, a.z * b};
+}
+
+inline Vec3 operator*(double b, Vec3 a)
+{
+    return a * b;
+}
+
+inline Vec3 operator*(Vec3 a, Vec3 b)
+{
+    return {a.x * b.x, a.y * b.y, a.z * b.z};
+}
+
+inline Vec3 operator/(Vec3 a, double b)
+{
+    return a * (1 / b);
+}
+
+inline Vec3& operator+=(Vec3& a, Vec3 b)
+{
+    a = a + b;
+
+    return a;
+}
+
+inline Vec3& operator*=(Vec3& a, Vec3 b)
+{
+    a = a * b;
+
+    return a;
+}
+
 double dot(Vec3 a, Vec3 b);
 Vec3 cross(Vec3 a, Vec3 b);
 Vec3 normalized(Vec3 a);
 
 // Explicit 16-byte lanes match GLSL std430 without relying on vec3 packing.
-struct alignas(16) Float4 { float x=0,y=0,z=0,w=0; };
-struct alignas(16) Int4 { int x=0,y=0,z=0,w=0; };
-enum MaterialKind { Lambertian, Metal, Dielectric, DiffuseLight, Schwarzschild };
-enum TextureKind { Constant, Checker, Image };
-struct SphereData { Float4 centerRadius; Int4 material; };
-struct MaterialData { Int4 kindTexture; Float4 parameters; }; // fuzz / IOR
-struct TextureData { Int4 kindChildren; Float4 color; Int4 image; }; // offset,width,height
-struct SceneData {
+struct alignas(16) Float4
+{
+    float x = 0, y = 0, z = 0, w = 0;
+};
+
+struct alignas(16) Int4
+{
+    int x = 0, y = 0, z = 0, w = 0;
+};
+
+enum MaterialKind
+{
+    Lambertian,
+    Metal,
+    Dielectric,
+    DiffuseLight,
+    Schwarzschild
+};
+
+enum TextureKind
+{
+    Constant,
+    Checker,
+    Image
+};
+
+struct SphereData
+{
+    Float4 centerRadius;
+    Int4 material;
+};
+
+struct MaterialData
+{
+    Int4 kindTexture;
+    Float4 parameters; // fuzz / IOR
+};
+
+struct TextureData
+{
+    Int4 kindChildren;
+    Float4 color;
+    Int4 image; // offset, width, height
+};
+
+struct SceneData
+{
     std::vector<SphereData> spheres;
     std::vector<MaterialData> materials;
     std::vector<TextureData> textures;
     std::vector<Float4> texels; // decoded linear RGB, original image row order
+
     void validate() const;
 };
-struct RenderSettings {
-    int width=800, height=600, samples=30;
-    std::uint32_t seed=1;
-    float relativeTolerance=1e-4f, absoluteTolerance=1e-6f, maxStep=0.05f;
-    int maxIntegrationAttempts=16384;
+
+struct RenderSettings
+{
+    int width = 800;
+    int height = 600;
+    int samples = 30;
+    std::uint32_t seed = 1;
+
+    float relativeTolerance = 1e-4f;
+    float absoluteTolerance = 1e-6f;
+    float maxStep = 0.05f;
+    int maxIntegrationAttempts = 16384;
+
     void validate() const;
 };
-struct CameraData {
-    Vec3 position{4,7,3}, lookAt{4,0,-1}, up{0,1,0};
-    double verticalFov=90;
-    std::array<Vec3,4> basis(double aspect) const;
+
+struct CameraData
+{
+    Vec3 position{4, 7, 3};
+    Vec3 lookAt{4, 0, -1};
+    Vec3 up{0, 1, 0};
+    double verticalFov = 90;
+
+    std::array<Vec3, 4> basis(double aspect) const;
 };
+
 SceneData defaultScene(const std::filesystem::path& assets);
 float decodeSrgb(float value);
 unsigned char encodeSrgb(double value);
 void savePng(const std::filesystem::path& path, int width, int height, const std::vector<Float4>& linear);
-}
+} // namespace rt

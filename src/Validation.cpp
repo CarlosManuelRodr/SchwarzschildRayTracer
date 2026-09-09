@@ -8,139 +8,299 @@
 #include <thread>
 #include <chrono>
 
-namespace rt { namespace {
-void require(bool value,const char* message) { if(!value) throw std::runtime_error(message); }
-double distance(Vec3 a,Vec3 b) { auto d=a-b; return std::sqrt(dot(d,d)); }
-SceneData fieldScene(Vec3 center=Vec3(0)) {
-    SceneData s; s.textures.push_back({}); s.materials.push_back({{Schwarzschild,0,0,0},{}});
-    s.spheres.push_back({{float(center.x),float(center.y),float(center.z),5.5f},{}}); return s;
+namespace rt
+{
+namespace
+{
+void require(bool value, const char* message)
+{
+    if (!value)
+        throw std::runtime_error(message);
 }
-SceneData surfaceScene(int kind) {
-    SceneData s; TextureData t; t.color={0.25f,0.5f,0.75f,0}; s.textures.push_back(t);
-    s.materials.push_back({{kind,0,0,0},{kind==Dielectric?1.5f:0.f,0,0,0}});
-    s.spheres.push_back({{0,0,0,1},{}}); return s;
+
+double distance(Vec3 a, Vec3 b)
+{
+    auto d = a - b;
+
+    return std::sqrt(dot(d, d));
 }
-void waitFor(GpuRenderer& gpu) {
-    auto start=std::chrono::steady_clock::now();
-    while(!gpu.progress().finished) {
-        gpu.poll(); gpu.dispatch(); std::this_thread::yield();
-        if(std::chrono::steady_clock::now()-start>std::chrono::seconds(120)) throw std::runtime_error("GPU validation timed out");
+
+SceneData fieldScene(Vec3 center = Vec3(0))
+{
+    SceneData s;
+    s.textures.push_back({});
+    s.materials.push_back({{Schwarzschild, 0, 0, 0}, {}});
+    s.spheres.push_back({{float(center.x), float(center.y), float(center.z), 5.5f}, {}});
+
+    return s;
+}
+
+SceneData surfaceScene(int kind)
+{
+    SceneData s;
+    TextureData t;
+    t.color = {0.25f, 0.5f, 0.75f, 0};
+    s.textures.push_back(t);
+    s.materials.push_back({{kind, 0, 0, 0}, {kind == Dielectric ? 1.5f : 0.f, 0, 0, 0}});
+    s.spheres.push_back({{0, 0, 0, 1}, {}});
+
+    return s;
+}
+
+void waitFor(GpuRenderer& gpu)
+{
+    auto start = std::chrono::steady_clock::now();
+
+    while (!gpu.progress().finished)
+    {
+        gpu.poll();
+        gpu.dispatch();
+        std::this_thread::yield();
+
+        if (std::chrono::steady_clock::now() - start > std::chrono::seconds(120))
+            throw std::runtime_error("GPU validation timed out");
     }
 }
-double imageRmse(const std::vector<Float4>& a,const std::vector<Float4>& b) {
-    require(a.size()==b.size(),"Image dimension mismatch"); double sum=0;
-    for(std::size_t i=0;i<a.size();++i) {
-        require(std::isfinite(a[i].x)&&std::isfinite(a[i].y)&&std::isfinite(a[i].z),"Nonfinite GPU output");
-        double x=a[i].x-b[i].x,y=a[i].y-b[i].y,z=a[i].z-b[i].z; sum+=x*x+y*y+z*z;
+
+double imageRmse(const std::vector<Float4>& a, const std::vector<Float4>& b)
+{
+    require(a.size() == b.size(), "Image dimension mismatch");
+    double sum = 0;
+
+    for (std::size_t i = 0; i < a.size(); ++i)
+    {
+        require(std::isfinite(a[i].x) && std::isfinite(a[i].y) && std::isfinite(a[i].z),
+                "Nonfinite GPU output");
+        double x = a[i].x - b[i].x, y = a[i].y - b[i].y, z = a[i].z - b[i].z;
+        sum += x * x + y * y + z * z;
     }
-    return std::sqrt(sum/(3*a.size()));
+
+    return std::sqrt(sum / (3 * a.size()));
 }
-}
+} // namespace
+
 void runCoreTests();
-int runCpuTests() {
-    runCoreTests(); RenderSettings settings;
-    auto field=fieldScene(); field.validate();
-    require(traceCpu(field,settings,{0,0,4},{0,0,-1}).status==3,"Radial ray must be captured");
-    require(traceCpu(field,settings,{0,0,0},{1,0,0}).status==3,"Ray inside horizon must be captured");
-    auto outward=traceCpu(field,settings,{0,0,4},{0,0,1});
-    require(outward.status==1&&distance(normalized(outward.direction),{0,0,1})<1e-12,"Radial escape must remain straight");
-    Vec3 origin{-7,2.8,0}, direction{1,0,0}, translation{3,-2,5};
-    auto original=traceCpu(field,settings,origin,direction);
-    auto translated=traceCpu(fieldScene(translation),settings,origin+translation,direction);
-    require(original.status==translated.status && distance(original.direction,translated.direction)<1e-8 &&
-        distance(original.position+translation,translated.position)<1e-8,"Gravity must be translation invariant");
-    auto fine=settings; fine.maxStep=0.005f; fine.relativeTolerance=1e-8f; fine.absoluteTolerance=1e-10f;
-    auto medium=settings; medium.maxStep=0.025f; medium.relativeTolerance=1e-6f; medium.absoluteTolerance=1e-8f;
-    auto ref=traceCpu(field,fine,origin,direction), mid=traceCpu(field,medium,origin,direction);
-    require(distance(mid.direction,ref.direction)<=distance(original.direction,ref.direction)+1e-8,"Integrator must converge with tighter steps/tolerances");
-    auto limited=settings; limited.maxIntegrationAttempts=1;
-    require(traceCpu(field,limited,{0,0,4},{0,0,-1}).status==2,"Integration budget exhaustion must be diagnosed");
-    auto emitter=surfaceScene(DiffuseLight); auto light=traceCpu(emitter,settings,{0,0,3},{0,0,-1});
-    require(distance(light.color,{0.25,0.5,0.75})<1e-12,"Emitted radiance must not be normalized");
-    for(int kind:{Lambertian,Metal,Dielectric,DiffuseLight}) {
-        auto s=surfaceScene(kind); s.validate(); auto result=traceCpu(s,settings,{0,0,3},{0,0,-1});
-        require(result.status==1&&std::isfinite(dot(result.color,result.color)),"Material trace failed");
+
+int runCpuTests()
+{
+    runCoreTests();
+    RenderSettings settings;
+    auto field = fieldScene();
+    field.validate();
+    require(traceCpu(field, settings, {0, 0, 4}, {0, 0, -1}).status == 3, "Radial ray must be captured");
+    require(traceCpu(field, settings, {0, 0, 0}, {1, 0, 0}).status == 3,
+            "Ray inside horizon must be captured");
+    auto outward = traceCpu(field, settings, {0, 0, 4}, {0, 0, 1});
+    require(outward.status == 1 && distance(normalized(outward.direction), {0, 0, 1}) < 1e-12,
+            "Radial escape must remain straight");
+    Vec3 origin{-7, 2.8, 0}, direction{1, 0, 0}, translation{3, -2, 5};
+    auto original = traceCpu(field, settings, origin, direction);
+    auto translated = traceCpu(fieldScene(translation), settings, origin + translation, direction);
+    require(original.status == translated.status &&
+                distance(original.direction, translated.direction) < 1e-8 &&
+                distance(original.position + translation, translated.position) < 1e-8,
+            "Gravity must be translation invariant");
+    auto fine = settings;
+    fine.maxStep = 0.005f;
+    fine.relativeTolerance = 1e-8f;
+    fine.absoluteTolerance = 1e-10f;
+    auto medium = settings;
+    medium.maxStep = 0.025f;
+    medium.relativeTolerance = 1e-6f;
+    medium.absoluteTolerance = 1e-8f;
+    auto ref = traceCpu(field, fine, origin, direction), mid = traceCpu(field, medium, origin, direction);
+    require(distance(mid.direction, ref.direction) <= distance(original.direction, ref.direction) + 1e-8,
+            "Integrator must converge with tighter steps/tolerances");
+    auto limited = settings;
+    limited.maxIntegrationAttempts = 1;
+    require(traceCpu(field, limited, {0, 0, 4}, {0, 0, -1}).status == 2,
+            "Integration budget exhaustion must be diagnosed");
+    auto emitter = surfaceScene(DiffuseLight);
+    auto light = traceCpu(emitter, settings, {0, 0, 3}, {0, 0, -1});
+    require(distance(light.color, {0.25, 0.5, 0.75}) < 1e-12, "Emitted radiance must not be normalized");
+
+    for (int kind : {Lambertian, Metal, Dielectric, DiffuseLight})
+    {
+        auto s = surfaceScene(kind);
+        s.validate();
+        auto result = traceCpu(s, settings, {0, 0, 3}, {0, 0, -1});
+        require(result.status == 1 && std::isfinite(dot(result.color, result.color)),
+                "Material trace failed");
     }
-    field.materials.push_back({{DiffuseLight,0,0,0},{}}); field.textures[0].color={2,1,0.5f,0};
-    field.spheres.push_back({{0,0,3,0.25f},{1,0,0,0}});
-    require(distance(traceCpu(field,settings,{0,0,4},{0,0,-1}).color,{2,1,0.5})<1e-12,"Missed surface inside gravity region");
-    std::cout<<"CPU tests passed: intersections, textures, materials, capture, translation, convergence, bounded integration.\n"; return 0;
+
+    field.materials.push_back({{DiffuseLight, 0, 0, 0}, {}});
+    field.textures[0].color = {2, 1, 0.5f, 0};
+    field.spheres.push_back({{0, 0, 3, 0.25f}, {1, 0, 0, 0}});
+    require(distance(traceCpu(field, settings, {0, 0, 4}, {0, 0, -1}).color, {2, 1, 0.5}) < 1e-12,
+            "Missed surface inside gravity region");
+    std::cout << "CPU tests passed: intersections, textures, materials, capture, translation, convergence, "
+                 "bounded integration.\n";
+    return 0;
 }
-int runGpuTests(const std::filesystem::path& assets) {
-    runCpuTests(); GpuRenderer gpu(assets); RenderSettings settings;
-    std::cout<<"Testing GPU: "<<gpu.device()<<std::endl;
-    auto fit=gpu.fitResolution(16000,9000);
-    require(fit[0]>0&&fit[1]>0&&fit[0]<=8192&&fit[1]<=8192&&
-        std::abs(double(fit[0])/fit[1]-16.0/9.0)<0.01,"Large-window resolution fitting failed");
-    std::vector<std::array<Vec3,2>> rays={{Vec3(0,0,4),Vec3(0,0,-1)},{Vec3(0,0,4),Vec3(0,0,1)},
-        {Vec3(0,0,0),Vec3(1,0,0)},{Vec3(-7,5.49,0),Vec3(1,0,0)},{Vec3(-7,2.8,0),Vec3(1,0,0)},
-        {Vec3(-7,1.8,0),Vec3(1,0,0)},{Vec3(-7,2.45,0),Vec3(1,0,0)},{Vec3(-7,2.5,0),Vec3(1,0,0)}};
-    auto field=fieldScene(); auto results=gpu.traceRays(field,settings,rays);
-    for(std::size_t i=0;i<rays.size();++i) {
-        auto cpu=traceCpu(field,settings,rays[i][0],rays[i][1]);
-        std::cout<<"Ray "<<i<<": status "<<results[i].status<<" vs "<<cpu.status<<", direction error "<<distance(results[i].direction,cpu.direction)<<std::endl;
-        require(results[i].status==cpu.status,"GPU/CPU capture classification mismatch");
-        require(distance(results[i].position,cpu.position)<0.005 && distance(results[i].direction,cpu.direction)<0.005,"GPU trajectory differs from double reference");
+
+int runGpuTests(const std::filesystem::path& assets)
+{
+    runCpuTests();
+    GpuRenderer gpu(assets);
+    RenderSettings settings;
+    std::cout << "Testing GPU: " << gpu.device() << std::endl;
+    auto fit = gpu.fitResolution(16000, 9000);
+    require(fit[0] > 0 && fit[1] > 0 && fit[0] <= 8192 && fit[1] <= 8192 &&
+                std::abs(double(fit[0]) / fit[1] - 16.0 / 9.0) < 0.01,
+            "Large-window resolution fitting failed");
+    std::vector<std::array<Vec3, 2>> rays = {{Vec3(0, 0, 4), Vec3(0, 0, -1)},
+                                             {Vec3(0, 0, 4), Vec3(0, 0, 1)},
+                                             {Vec3(0, 0, 0), Vec3(1, 0, 0)},
+                                             {Vec3(-7, 5.49, 0), Vec3(1, 0, 0)},
+                                             {Vec3(-7, 2.8, 0), Vec3(1, 0, 0)},
+                                             {Vec3(-7, 1.8, 0), Vec3(1, 0, 0)},
+                                             {Vec3(-7, 2.45, 0), Vec3(1, 0, 0)},
+                                             {Vec3(-7, 2.5, 0), Vec3(1, 0, 0)}};
+    auto field = fieldScene();
+    auto results = gpu.traceRays(field, settings, rays);
+
+    for (std::size_t i = 0; i < rays.size(); ++i)
+    {
+        auto cpu = traceCpu(field, settings, rays[i][0], rays[i][1]);
+        std::cout << "Ray " << i << ": status " << results[i].status << " vs " << cpu.status
+                  << ", direction error " << distance(results[i].direction, cpu.direction) << std::endl;
+        require(results[i].status == cpu.status, "GPU/CPU capture classification mismatch");
+        require(distance(results[i].position, cpu.position) < 0.005 &&
+                    distance(results[i].direction, cpu.direction) < 0.005,
+                "GPU trajectory differs from double reference");
     }
-    Vec3 translation{3,-2,5}; auto shiftedRays=rays;
-    for(auto& ray:shiftedRays) ray[0]+=translation;
-    auto shifted=gpu.traceRays(fieldScene(translation),settings,shiftedRays);
-    for(std::size_t i=0;i<rays.size();++i) require(shifted[i].status==results[i].status&&
-        distance(shifted[i].position,results[i].position+translation)<0.005,"GPU translation invariance failed");
-    auto limited=settings; limited.maxIntegrationAttempts=1;
-    auto exhausted=gpu.traceRays(field,limited,{{Vec3(0,0,4),Vec3(0,0,-1)}});
-    require(exhausted[0].status==2&&exhausted[0].attempts==1&&gpu.progress().failures==1,"GPU attempt limit/diagnostic failed");
-    auto embedded=field; embedded.materials.push_back({{DiffuseLight,0,0,0},{}});
-    embedded.textures[0].color={2,1,0.5f,0}; embedded.spheres.push_back({{0,0,3,0.25f},{1,0,0,0}});
-    auto embeddedHit=gpu.traceRays(embedded,settings,{{Vec3(0,0,4),Vec3(0,0,-1)}});
-    require(distance(embeddedHit[0].color,{2,1,0.5})<1e-5,"GPU missed object within gravity region");
-    for(int kind:{Lambertian,Metal,Dielectric,DiffuseLight}) {
-        auto scene=surfaceScene(kind); auto result=gpu.traceRays(scene,settings,{{Vec3(0,0,3),Vec3(0,0,-1)}});
-        auto cpu=traceCpu(scene,settings,{0,0,3},{0,0,-1});
-        require(distance(result[0].color,cpu.color)<1e-4,"GPU material mismatch");
+
+    Vec3 translation{3, -2, 5};
+    auto shiftedRays = rays;
+
+    for (auto& ray : shiftedRays)
+        ray[0] += translation;
+    auto shifted = gpu.traceRays(fieldScene(translation), settings, shiftedRays);
+
+    for (std::size_t i = 0; i < rays.size(); ++i)
+        require(shifted[i].status == results[i].status &&
+                    distance(shifted[i].position, results[i].position + translation) < 0.005,
+                "GPU translation invariance failed");
+    auto limited = settings;
+    limited.maxIntegrationAttempts = 1;
+    auto exhausted = gpu.traceRays(field, limited, {{Vec3(0, 0, 4), Vec3(0, 0, -1)}});
+    require(exhausted[0].status == 2 && exhausted[0].attempts == 1 && gpu.progress().failures == 1,
+            "GPU attempt limit/diagnostic failed");
+    auto embedded = field;
+    embedded.materials.push_back({{DiffuseLight, 0, 0, 0}, {}});
+    embedded.textures[0].color = {2, 1, 0.5f, 0};
+    embedded.spheres.push_back({{0, 0, 3, 0.25f}, {1, 0, 0, 0}});
+    auto embeddedHit = gpu.traceRays(embedded, settings, {{Vec3(0, 0, 4), Vec3(0, 0, -1)}});
+    require(distance(embeddedHit[0].color, {2, 1, 0.5}) < 1e-5, "GPU missed object within gravity region");
+
+    for (int kind : {Lambertian, Metal, Dielectric, DiffuseLight})
+    {
+        auto scene = surfaceScene(kind);
+        auto result = gpu.traceRays(scene, settings, {{Vec3(0, 0, 3), Vec3(0, 0, -1)}});
+        auto cpu = traceCpu(scene, settings, {0, 0, 3}, {0, 0, -1});
+        require(distance(result[0].color, cpu.color) < 1e-4, "GPU material mismatch");
     }
-    auto textured=surfaceScene(DiffuseLight);
-    textured.textures[0].kindChildren={Checker,1,2,0};
-    TextureData odd,even; odd.color={1,0,0,0}; even.color={0,1,0,0};
-    textured.textures.push_back(odd); textured.textures.push_back(even);
-    std::vector<std::array<Vec3,2>> textureRays={{Vec3(3,3,3),Vec3(-1,-1,-1)},{Vec3(-3,3,3),Vec3(1,-1,-1)}};
-    auto checker=gpu.traceRays(textured,settings,textureRays);
-    require(distance(checker[0].color,{0,1,0})<1e-6&&distance(checker[1].color,{1,0,0})<1e-6,"GPU checker texture failed");
-    textured.textures[0].kindChildren.x=Image; textured.textures[0].image={0,2,2,0};
-    textured.texels={{1,0,0,0},{0,1,0,0},{0,0,1,0},{1,1,1,0}};
-    textureRays={{Vec3(0,3,0),Vec3(0,-1,0)},{Vec3(0,-3,0),Vec3(0,1,0)},
-        {Vec3(3,0,0),Vec3(-1,0,0)},{Vec3(0,0,3),Vec3(0,0,-1)}};
-    auto texturedResults=gpu.traceRays(textured,settings,textureRays);
-    for(std::size_t i=0;i<textureRays.size();++i) require(distance(texturedResults[i].color,
-        traceCpu(textured,settings,textureRays[i][0],textureRays[i][1]).color)<1e-6,"GPU image UV boundary mismatch");
-    auto scene=defaultScene(assets); settings.width=64; settings.height=48; settings.samples=8;
-    gpu.uploadScene(scene); gpu.reset(settings,CameraData{}); waitFor(gpu);
-    auto first=gpu.readback(),cpu=renderCpu(scene,settings,CameraData{});
-    double rmse=imageRmse(first,cpu); std::cout<<"Default scene linear RGB RMSE: "<<rmse<<std::endl;
-    require(rmse<0.035,"GPU image differs excessively from CPU reference"); require(gpu.progress().failures==0,"GPU invalid rays in default scene");
-    gpu.present(1,1); unsigned char screen[4]{}; glReadPixels(0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,screen);
-    auto center=first[std::size_t(settings.height/2)*settings.width+settings.width/2];
-    require(std::abs(int(screen[0])-int(encodeSrgb(center.x)))<=1 &&
-        std::abs(int(screen[1])-int(encodeSrgb(center.y)))<=1 &&
-        std::abs(int(screen[2])-int(encodeSrgb(center.z)))<=1,"Display shader gamma/presentation mismatch");
-    gpu.reset(settings,CameraData{}); waitFor(gpu);
-    require(imageRmse(first,gpu.readback())==0,"GPU fixed seed must be repeatable after reset");
-    auto camera=CameraData{}; camera.position.x+=0.5; camera.lookAt.x+=0.5;
-    settings.width=37; settings.height=23; settings.samples=2;
-    gpu.reset(settings,CameraData{}); gpu.dispatch(); // Cancel an in-flight view safely.
-    gpu.reset(settings,camera); waitFor(gpu);
-    auto resized=gpu.readback(); require(resized.size()==851,"Resize failed");
-    for(auto p:resized) require(p.w==2,"Accumulation retained stale samples");
-    require(imageRmse(resized,renderCpu(scene,settings,camera))<0.06,"Camera reset render mismatch");
-    auto path=std::filesystem::temp_directory_path()/("schwarzschild-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".png");
-    savePng(path,1,2,{{1,0,0,1},{0,0,1,1}}); sf::Image png;
-    require(png.loadFromFile(path.string()),"PNG export unreadable"); std::filesystem::remove(path);
-    require(png.getPixel(0,0)==sf::Color::Blue&&png.getPixel(0,1)==sf::Color::Red,"PNG orientation/color wrong");
-    bool missing=false; try { GpuRenderer invalid(assets/"missing"); } catch(const std::exception&) { missing=true; }
-    require(missing,"Missing shader must fail explicitly");
-    missing=false; try { defaultScene(assets/"missing"); } catch(const std::exception&) { missing=true; }
-    require(missing,"Missing image must fail explicitly");
-    require(glGetError()==GL_NO_ERROR,"OpenGL error during validation");
-    std::cout<<"GPU tests passed: trajectories, materials/textures, deterministic rendering, cancellation/resize, presentation, PNG, missing assets.\n"; return 0;
+
+    auto textured = surfaceScene(DiffuseLight);
+    textured.textures[0].kindChildren = {Checker, 1, 2, 0};
+    TextureData odd, even;
+    odd.color = {1, 0, 0, 0};
+    even.color = {0, 1, 0, 0};
+    textured.textures.push_back(odd);
+    textured.textures.push_back(even);
+    std::vector<std::array<Vec3, 2>> textureRays = {{Vec3(3, 3, 3), Vec3(-1, -1, -1)},
+                                                    {Vec3(-3, 3, 3), Vec3(1, -1, -1)}};
+    auto checker = gpu.traceRays(textured, settings, textureRays);
+    require(distance(checker[0].color, {0, 1, 0}) < 1e-6 && distance(checker[1].color, {1, 0, 0}) < 1e-6,
+            "GPU checker texture failed");
+    textured.textures[0].kindChildren.x = Image;
+    textured.textures[0].image = {0, 2, 2, 0};
+    textured.texels = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {1, 1, 1, 0}};
+    textureRays = {{Vec3(0, 3, 0), Vec3(0, -1, 0)},
+                   {Vec3(0, -3, 0), Vec3(0, 1, 0)},
+                   {Vec3(3, 0, 0), Vec3(-1, 0, 0)},
+                   {Vec3(0, 0, 3), Vec3(0, 0, -1)}};
+    auto texturedResults = gpu.traceRays(textured, settings, textureRays);
+
+    for (std::size_t i = 0; i < textureRays.size(); ++i)
+        require(distance(texturedResults[i].color,
+                         traceCpu(textured, settings, textureRays[i][0], textureRays[i][1]).color) < 1e-6,
+                "GPU image UV boundary mismatch");
+    auto scene = defaultScene(assets);
+    settings.width = 64;
+    settings.height = 48;
+    settings.samples = 8;
+    gpu.uploadScene(scene);
+    gpu.reset(settings, CameraData{});
+    waitFor(gpu);
+    auto first = gpu.readback(), cpu = renderCpu(scene, settings, CameraData{});
+    double rmse = imageRmse(first, cpu);
+    std::cout << "Default scene linear RGB RMSE: " << rmse << std::endl;
+    require(rmse < 0.035, "GPU image differs excessively from CPU reference");
+    require(gpu.progress().failures == 0, "GPU invalid rays in default scene");
+    gpu.present(1, 1);
+    unsigned char screen[4]{};
+    glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, screen);
+    auto center = first[std::size_t(settings.height / 2) * settings.width + settings.width / 2];
+    require(std::abs(int(screen[0]) - int(encodeSrgb(center.x))) <= 1 &&
+                std::abs(int(screen[1]) - int(encodeSrgb(center.y))) <= 1 &&
+                std::abs(int(screen[2]) - int(encodeSrgb(center.z))) <= 1,
+            "Display shader gamma/presentation mismatch");
+    gpu.reset(settings, CameraData{});
+    waitFor(gpu);
+    require(imageRmse(first, gpu.readback()) == 0, "GPU fixed seed must be repeatable after reset");
+    auto camera = CameraData{};
+    camera.position.x += 0.5;
+    camera.lookAt.x += 0.5;
+    settings.width = 37;
+    settings.height = 23;
+    settings.samples = 2;
+    gpu.reset(settings, CameraData{});
+    gpu.dispatch(); // Cancel an in-flight view safely.
+    gpu.reset(settings, camera);
+    waitFor(gpu);
+    auto resized = gpu.readback();
+    require(resized.size() == 851, "Resize failed");
+
+    for (auto p : resized)
+        require(p.w == 2, "Accumulation retained stale samples");
+    require(imageRmse(resized, renderCpu(scene, settings, camera)) < 0.06, "Camera reset render mismatch");
+    auto path = std::filesystem::temp_directory_path() /
+                ("schwarzschild-test-" +
+                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".png");
+    savePng(path, 1, 2, {{1, 0, 0, 1}, {0, 0, 1, 1}});
+    sf::Image png;
+    require(png.loadFromFile(path.string()), "PNG export unreadable");
+    std::filesystem::remove(path);
+    require(png.getPixel(0, 0) == sf::Color::Blue && png.getPixel(0, 1) == sf::Color::Red,
+            "PNG orientation/color wrong");
+    bool missing = false;
+
+    try
+    {
+        GpuRenderer invalid(assets / "missing");
+    }
+    catch (const std::exception&)
+    {
+        missing = true;
+    }
+
+    require(missing, "Missing shader must fail explicitly");
+    missing = false;
+
+    try
+    {
+        defaultScene(assets / "missing");
+    }
+    catch (const std::exception&)
+    {
+        missing = true;
+    }
+
+    require(missing, "Missing image must fail explicitly");
+    require(glGetError() == GL_NO_ERROR, "OpenGL error during validation");
+    std::cout << "GPU tests passed: trajectories, materials/textures, deterministic rendering, "
+                 "cancellation/resize, presentation, PNG, missing assets.\n";
+    return 0;
 }
-}
+} // namespace rt
