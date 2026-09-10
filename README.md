@@ -2,18 +2,21 @@
 
 ## Observer velocity and views inside the horizon
 
-The properties panel includes **Observer velocity** controls for X/Y/Z speed
-magnitudes and signs. They specify velocity relative to the world-aligned local
-freely falling frame, not navigation speed. Zero means a rain observer falling
-from rest at infinity. The combined speed is constrained to **0.999c** because a
+The properties panel offers **Hovering** (default) and **Freely falling** observers.
+Velocity is view-relative: **Right/Left**, **Up/Down**, and **Forward/Backward**.
+The directions rotate with the view, including pitch. Hovering at zero velocity
+preserves the original exterior image exactly; freely falling at zero means a
+rain observer falling from rest at infinity. The combined speed is constrained to **0.999c** because a
 camera rest frame does not exist at exactly c. The camera stays where you place
 it; changing velocity modifies aberration and the measured color/brightness.
 
 At or inside the event horizon, the renderer automatically uses horizon-crossing
 backward rays and full integration to view exterior sources. Outside, the selected
 fixed-radius/full-scene/adaptive mode is retained. Full-scene mode gives the most
-consistent transition across the horizon. The former zero-velocity hovering view
-and the new zero-velocity freely falling view are intentionally different.
+consistent transition across the horizon. Hovering is impossible at/inside the
+horizon, so the freely falling frame is used there automatically. The selected
+exterior observer type returns when the camera moves outside. Choose Freely
+falling on both sides to avoid a reference-frame change at the horizon.
 
 See [Observer and horizon equations](docs/observer-and-horizon.md) for the English
 derivation, reference-frame conventions, frequency shifts, validation, and model

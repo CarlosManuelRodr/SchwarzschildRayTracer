@@ -28,9 +28,41 @@ There is no coordinate singularity at `r = 1`. The orthonormal rain tetrad is
 e_{(0)}=(1,-\mathbf w),\qquad e_{(i)}=(0,\hat{\mathbf e}_i).
 \]
 
-Its reference observers fall radially from rest at infinity. The spatial axes
-are aligned with the scene's X/Y/Z axes. This frame is used **outside and inside**
-the horizon, avoiding a change in the meaning of velocity at the crossing.
+Its reference observers fall radially from rest at infinity. The mathematical
+tetrad axes are world-aligned, but the user controls are view-relative. This
+frame is used on both sides when Freely falling is selected, and automatically
+at/inside the horizon when Hovering is selected.
+
+## View-relative controls and hovering observers
+
+Hovering is the default observer type. Let `f` be normalized camera forward,
+`r_c = normalize(f × cameraUp)` camera right, and `u_c = r_c × f` screen up.
+Panel components are transformed on every CPU/GPU camera reset:
+
+\[
+\boldsymbol\beta = \beta_{right}\mathbf r_c + \beta_{up}\mathbf u_c + \beta_{forward}\mathbf f.
+\]
+
+Rotation rotates the velocity direction; screen up is not fixed world up.
+Low-level diagnostic ray APIs accept already transformed world-tetrad components
+because they have no camera orientation.
+
+For hovering outside, boost the camera photon into the static local tetrad using
+the Lorentz formulas below. With `α = sqrt(1−1/r)`, initialize
+
+\[
+\mathbf V=-[\mathbf p+(\alpha-1)(\mathbf p\cdot\mathbf n)\mathbf n],\qquad E=\alpha\omega.
+\]
+
+Exactly zero hovering velocity deliberately uses the original exterior camera
+initialization and shading for exact visual compatibility. That path is an
+approximation, so an arbitrarily small nonzero velocity need not reproduce it
+exactly. At `r <= 1` the renderer uses the rain frame, retaining the exterior
+selection for when the camera returns outside. This frame change can change the
+image abruptly; select Freely falling before crossing for a continuous frame.
+
+The remaining rain-frame derivation applies to Freely falling and the automatic
+interior fallback. Zero velocity in these cases denotes infall, not hovering.
 
 ## User velocity and the physical observer
 
@@ -47,9 +79,10 @@ u=\gamma(e_{(0)}+\beta^i e_{(i)}).
 
 Thus `u^T = γ` and `u^i = γ(β^i - w^i)`. Inside the horizon,
 `u^r = γ(β_r - 1/√r) < 0`: all physical observers move inward, even when a
-paused rendering does not update their positions. A zero velocity setting is
-a rain observer, **not a hovering observer**. Outside the horizon, instantaneous
-hovering can be represented by `β = w`, when its magnitude fits the UI limit.
+paused rendering does not update their positions. In Freely falling mode, zero
+velocity is a rain observer, **not a hovering observer**. Outside the horizon,
+instantaneous hovering in that mode can also be represented by the appropriate
+view components of `β = w`, when its magnitude fits the UI limit.
 
 A massive camera cannot travel at exactly `c`. The UI shows a 0-to-c component
 scale but rescales the vector to a maximum combined speed of `0.999c`; the scene
@@ -184,9 +217,10 @@ for the smoothest exterior-to-interior transition. Adaptive cutoff adds its
 documented truncation error. The frame itself is continuous in all modes, but
 switching a truncated geometry to full integration can change the image.
 
-At zero panel velocity the exterior image intentionally differs from the former
-hovering-camera image. Legacy numerical regression fixtures explicitly set
-`useObserverFrame = false`; normal application rendering enables it.
+At zero panel velocity, Hovering reproduces the former exterior image exactly.
+Freely falling intentionally differs. Legacy numerical regression fixtures
+explicitly set `useObserverFrame = false`; camera preparation also selects that
+compatibility path for stationary exterior hovering.
 
 Tests cover the null constraint and angular momentum through a horizon crossing,
 analytic radial frequency shifts at radii below/on/above one, boosts up to

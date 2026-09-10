@@ -221,6 +221,13 @@ void initTrace(OUT(TraceState) s, vec3 p, vec3 v, uint seed)
         // coordinates. This remains finite on the future event horizon.
         s.v = flow * frequency - momentum;
         s.energy = frequency - dot(flow, momentum);
+        if (hoveringObserver() && s.observerMode < 2)
+        {
+            real lapse = sqrt(max(real(1e-12), real(1) - dot(flow, flow)));
+            vec3 radial = safeUnit(flow);
+            s.v = -(momentum + (lapse - real(1)) * dot(momentum, radial) * radial);
+            s.energy = lapse * frequency;
+        }
         s.observerLapse = redshiftEnabled() ? s.energy : real(1);
         if (s.energy <= real(0))
             s.status = 3; // No positive-energy exterior source on this past ray.

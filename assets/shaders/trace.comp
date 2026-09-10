@@ -85,6 +85,12 @@ uniform int firstPassOnly;
 uniform int gravityMode;
 uniform vec3 observerBeta;
 uniform int useObserverFrame;
+uniform int observerType;
+
+bool hoveringObserver()
+{
+    return observerType == 0;
+}
 
 vec3 observerVelocity()
 {

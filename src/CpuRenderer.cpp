@@ -198,6 +198,11 @@ bool observerFrameEnabled()
     return settings->useObserverFrame;
 }
 
+bool hoveringObserver()
+{
+    return settings->observerType == RenderSettings::Hovering;
+}
+
 real relativeTolerance()
 {
     return settings->relativeTolerance;
@@ -241,6 +246,7 @@ std::vector<Float4> renderCpu(const SceneData& scene,
     scene.validate();
     settings.validate();
     auto basis = camera.basis(double(settings.width) / settings.height);
+    auto observer = observerSettings(scene, settings, camera);
     std::vector<Float4> pixels(std::size_t(settings.width) * settings.height);
     std::atomic<int> row{0};
     std::atomic<std::uint64_t> bad{0};
@@ -259,7 +265,7 @@ std::vector<Float4> renderCpu(const SceneData& scene,
                     double u = (x + reference::randomValue(rng)) / settings.width,
                            v = (y + reference::randomValue(rng)) / settings.height;
                     auto result = traceCpu(
-                        scene, settings, basis[0], basis[1] + u * basis[2] + v * basis[3] - basis[0], rng);
+                        scene, observer, basis[0], basis[1] + u * basis[2] + v * basis[3] - basis[0], rng);
                     color += result.color;
 
                     if (result.status == 2)
@@ -371,6 +377,7 @@ void runCoreTests()
     // horizon-crossing initial data; legacy tests above intentionally use the old frame.
     scene.materials[0] = {{Schwarzschild, 0, 0, 0}, {}};
     settings.useObserverFrame = true;
+    settings.observerType = RenderSettings::FreelyFalling;
     settings.observerVelocity = {0.2, -0.1, 0.3};
     reference::TraceState observerRay;
     reference::initTrace(observerRay, {0.7, 0, 0}, {1, 0.3, 0.2}, 1);

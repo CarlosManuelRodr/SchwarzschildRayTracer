@@ -161,7 +161,15 @@ struct RenderSettings
     std::uint32_t seed = 1;
     bool redshift = true;
     float exposure = 1.0f;
-    Vec3 observerVelocity{0, 0, 0}; // Units of c in the world-aligned local rain tetrad.
+
+    enum ObserverType
+    {
+        Hovering,
+        FreelyFalling
+    };
+
+    ObserverType observerType = Hovering;
+    Vec3 observerVelocity{0, 0, 0}; // View-local right/up/forward, in units of c.
     bool useObserverFrame = true;   // False only for legacy numerical reference fixtures.
 
     float relativeTolerance = 1e-4f;
@@ -186,6 +194,9 @@ struct CameraData
 };
 
 SceneData defaultScene(const std::filesystem::path& assets);
+RenderSettings observerSettings(const SceneData& scene,
+                                const RenderSettings& settings,
+                                const CameraData& camera);
 float decodeSrgb(float value);
 unsigned char encodeSrgb(double value);
 double toneMap(double value, double exposure = 1.0);

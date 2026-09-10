@@ -107,6 +107,27 @@ int runCpuTests()
             "Pitch clamping must preserve focus distance and a valid basis");
 
     RenderSettings settings;
+    CameraData velocityCamera;
+    velocityCamera.position = {0, 0, 4};
+    velocityCamera.lookAt = {0, 0, 3};
+    auto velocityScene = fieldScene();
+    require(!observerSettings(velocityScene, settings, velocityCamera).useObserverFrame,
+            "Zero-speed hovering must select the legacy exterior camera");
+    settings.observerVelocity = {0, 0, 0.3};
+    velocityCamera.rotateView(3.141592653589793 / 2, 0);
+    require(distance(observerSettings(velocityScene, settings, velocityCamera).observerVelocity,
+                     {0.3, 0, 0}) < 1e-12,
+            "Forward velocity must rotate with the view");
+    settings.observerVelocity = {0, 0.2, 0};
+    velocityCamera.rotateView(0, 0.5);
+    auto expectedUp = 0.2 * normalized(velocityCamera.basis(1)[3]);
+    require(distance(observerSettings(velocityScene, settings, velocityCamera).observerVelocity, expectedUp) <
+                1e-12,
+            "Up velocity must follow camera pitch rather than world up");
+    settings.observerVelocity = Vec3(0);
+    velocityCamera.position = {0, 0, 0.5};
+    require(observerSettings(velocityScene, settings, velocityCamera).useObserverFrame,
+            "Hovering selection must activate a physical interior frame automatically");
     settings.useObserverFrame = false;
     require(settings.integrationMode == RenderSettings::FixedRadius, "Fixed radius must be the default");
     settings.integrationMode = RenderSettings::FullScene;
@@ -214,6 +235,7 @@ int runCpuTests()
     observerScene.materials.push_back({{Environment, 0, 0, 0}, {1, 0, 0, 0}});
     observerScene.spheres.push_back({{0, 0, 0, 20}, {1, 0, 0, 0}});
     RenderSettings observerSettings;
+    observerSettings.observerType = RenderSettings::FreelyFalling;
     observerSettings.integrationMode = RenderSettings::FullScene;
     for (double radius : {0.25, 0.9, 0.9999, 1.0, 1.0001, 2.0, 8.0})
     {
@@ -556,6 +578,7 @@ int runGpuTests(const std::filesystem::path& assets)
     movingScene.materials.push_back({{Environment, 0, 0, 0}, {1, 0, 0, 0}});
     movingScene.spheres.push_back({{0, 0, 0, 20}, {1, 0, 0, 0}});
     RenderSettings movingSettings;
+    movingSettings.observerType = RenderSettings::FreelyFalling;
     movingSettings.integrationMode = RenderSettings::FullScene;
     std::vector<std::array<Vec3, 2>> movingRays;
     for (double radius : {0.25, 0.9, 0.9999, 1.0, 1.0001, 2.0})
@@ -634,6 +657,24 @@ int runGpuTests(const std::filesystem::path& assets)
                 "Exterior velocity rendering must agree with CPU in every integration mode");
     }
     require(glGetError() == GL_NO_ERROR, "OpenGL error during validation");
+    movingSettings.observerType = RenderSettings::Hovering;
+    movingSettings.observerVelocity = Vec3(0);
+    gpu.reset(movingSettings, CameraData{});
+    waitFor(gpu);
+    auto hoveringImage = gpu.readback();
+    auto legacySettings = movingSettings;
+    legacySettings.useObserverFrame = false;
+    gpu.reset(legacySettings, CameraData{});
+    waitFor(gpu);
+    require(imageRmse(hoveringImage, gpu.readback()) == 0 &&
+                imageRmse(renderCpu(scene, movingSettings, CameraData{}),
+                          renderCpu(scene, legacySettings, CameraData{})) == 0,
+            "Zero-speed hovering must exactly preserve legacy rendering");
+    movingSettings.observerVelocity = {0.2, 0.1, -0.3};
+    gpu.reset(movingSettings, CameraData{});
+    waitFor(gpu);
+    require(imageRmse(gpu.readback(), renderCpu(scene, movingSettings, CameraData{})) < 0.06,
+            "Moving hovering observer must agree on CPU/GPU");
     std::cout << "GPU tests passed: trajectories, materials/textures, deterministic rendering, "
                  "cancellation/resize, presentation, PNG, missing assets.\n";
     return 0;

@@ -145,9 +145,17 @@ PanelActions SettingsPanel::draw(double& slowStep,
 
         if (ImGui::CollapsingHeader("Observer velocity", ImGuiTreeNodeFlags_DefaultOpen))
         {
+            int observerType = int(draft.observerType);
+            const char* observers[] = {"Hovering", "Freely falling"};
+            if (ImGui::Combo("Observer type", &observerType, observers, 2))
+            {
+                draft.observerType = RenderSettings::ObserverType(observerType);
+                actions.renderChanged = true;
+            }
             double components[] = {
                 draft.observerVelocity.x, draft.observerVelocity.y, draft.observerVelocity.z};
-            const char* axes[] = {"X", "Y", "Z"};
+            const char* axes[] = {"Right", "Up", "Forward"};
+            const char* reverse[] = {"Left", "Down", "Backward"};
             bool changed = false;
             for (int axis = 0; axis < 3; ++axis)
             {
@@ -158,7 +166,7 @@ PanelActions SettingsPanel::draw(double& slowStep,
                 changed |=
                     ImGui::SliderFloat("Speed / c", &magnitude, 0, 1, "%.5f", ImGuiSliderFlags_AlwaysClamp);
                 ImGui::SameLine();
-                changed |= ImGui::Checkbox("Negative", &negative);
+                changed |= ImGui::Checkbox(reverse[axis], &negative);
                 components[axis] = negative ? -double(magnitude) : double(magnitude);
                 ImGui::PopID();
             }
@@ -178,9 +186,11 @@ PanelActions SettingsPanel::draw(double& slowStep,
             }
             ImGui::Text("Combined speed: %.5f c",
                         std::sqrt(dot(draft.observerVelocity, draft.observerVelocity)));
-            ImGui::TextWrapped("World-aligned axes in the local freely falling frame. Zero means falling "
-                               "from rest at infinity. This changes the image, not camera position. Total "
-                               "speed is limited to 0.999c; a camera cannot travel at c.");
+            ImGui::TextWrapped("Directions follow the view as you rotate. Velocity changes the image, not "
+                               "camera position. Combined speed is limited to 0.999c.");
+            ImGui::TextWrapped(draft.observerType == RenderSettings::Hovering
+                                   ? "Hovering: zero velocity preserves the original exterior view."
+                                   : "Freely falling: zero velocity means falling from rest at infinity.");
             for (auto sphere : scene.spheres)
             {
                 if (scene.materials[sphere.material.x].kindTexture.x != Schwarzschild)
@@ -192,8 +202,9 @@ PanelActions SettingsPanel::draw(double& slowStep,
                 if (radius <= 1e-4)
                     ImGui::TextWrapped("Singularity guard: no physical observer frame is defined here.");
                 else if (radius <= 1)
-                    ImGui::TextWrapped("Horizon/interior: automatic horizon-crossing integration. The "
-                                       "exterior cutoff setting is temporarily bypassed.");
+                    ImGui::TextWrapped("Horizon/interior: freely falling frame and full integration are used "
+                                       "automatically; hovering is impossible here. The selected exterior "
+                                       "type returns when you move outside.");
             }
         }
 

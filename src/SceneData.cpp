@@ -88,6 +88,8 @@ unsigned char encodeSrgb(double v)
 
 void RenderSettings::validate() const
 {
+    if (observerType != Hovering && observerType != FreelyFalling)
+        throw std::runtime_error("Invalid observer type");
     double speedSquared = dot(observerVelocity, observerVelocity);
     if (!std::isfinite(speedSquared) || speedSquared > 0.999 * 0.999 + 1e-12)
         throw std::runtime_error("Observer speed must not exceed 0.999c");
@@ -179,6 +181,31 @@ void SceneData::validate() const
     for (auto t : texels)
         if (!finite(t))
             throw std::runtime_error("Nonfinite texel");
+}
+
+RenderSettings observerSettings(const SceneData& scene,
+                                const RenderSettings& settings,
+                                const CameraData& camera)
+{
+    auto result = settings;
+    auto basis = camera.basis(1);
+    Vec3 right = normalized(basis[2]);
+    Vec3 up = normalized(basis[3]);
+    Vec3 forward = normalized(camera.lookAt - camera.position);
+    auto velocity = settings.observerVelocity;
+    result.observerVelocity = velocity.x * right + velocity.y * up + velocity.z * forward;
+    bool interior = false;
+    for (auto sphere : scene.spheres)
+    {
+        if (scene.materials[sphere.material.x].kindTexture.x != Schwarzschild)
+            continue;
+        Vec3 offset =
+            camera.position - Vec3(sphere.centerRadius.x, sphere.centerRadius.y, sphere.centerRadius.z);
+        interior = dot(offset, offset) <= 1;
+    }
+    if (!interior && settings.observerType == RenderSettings::Hovering && dot(velocity, velocity) == 0)
+        result.useObserverFrame = false; // Exact compatibility with the original exterior camera.
+    return result;
 }
 
 SceneData defaultScene(const std::filesystem::path& assets)

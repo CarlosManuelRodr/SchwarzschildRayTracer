@@ -126,6 +126,7 @@ struct GpuRenderer::Impl
 
     GLsync fence = nullptr;
     RenderSettings settings;
+    SceneData observerGeometry; // Only sphere/material metadata needed for camera-frame selection.
     GpuProgress stats;
     bool resetPending = true;
     bool hasImage = false;
@@ -247,6 +248,8 @@ std::array<int, 2> GpuRenderer::fitResolution(int width, int height) const
 
 void GpuRenderer::uploadScene(const SceneData& scene)
 {
+    impl->observerGeometry.spheres = scene.spheres;
+    impl->observerGeometry.materials = scene.materials;
     scene.validate();
     auto& g = *impl;
     g.wait();
@@ -338,11 +341,13 @@ void GpuRenderer::reset(const RenderSettings& settings, const CameraData& camera
     g.integer("maxAttempts", settings.maxIntegrationAttempts);
     g.integer("useRedshift", settings.redshift ? 1 : 0);
     g.integer("gravityMode", int(settings.integrationMode));
-    g.integer("useObserverFrame", settings.useObserverFrame ? 1 : 0);
+    auto observer = observerSettings(g.observerGeometry, settings, camera);
+    g.integer("observerType", int(settings.observerType));
+    g.integer("useObserverFrame", observer.useObserverFrame ? 1 : 0);
     glUniform3f(glGetUniformLocation(g.trace, "observerBeta"),
-                float(settings.observerVelocity.x),
-                float(settings.observerVelocity.y),
-                float(settings.observerVelocity.z));
+                float(observer.observerVelocity.x),
+                float(observer.observerVelocity.y),
+                float(observer.observerVelocity.z));
 
     glUniform1f(glGetUniformLocation(g.trace, "relTolerance"), settings.relativeTolerance);
     glUniform1f(glGetUniformLocation(g.trace, "absTolerance"), settings.absoluteTolerance);
@@ -547,6 +552,13 @@ std::vector<RayResult> GpuRenderer::traceRays(const SceneData& scene,
     g.buffer(6, input.data(), input.size() * sizeof(Float4));
     glUseProgram(g.trace);
     g.integer("testMode", 1);
+    // Diagnostic rays have no camera basis: their supplied velocity uses the
+    // same world-aligned tetrad convention as traceCpu's low-level API.
+    g.integer("useObserverFrame", settings.useObserverFrame ? 1 : 0);
+    glUniform3f(glGetUniformLocation(g.trace, "observerBeta"),
+                float(settings.observerVelocity.x),
+                float(settings.observerVelocity.y),
+                float(settings.observerVelocity.z));
 
     while (!g.stats.finished)
     {
