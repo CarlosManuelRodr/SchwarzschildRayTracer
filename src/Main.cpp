@@ -1,5 +1,7 @@
 #include "GpuRenderer.h"
-#include <SFML/Window.hpp>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
+#include "SdlSupport.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -17,33 +19,16 @@ extern "C"
     __declspec(dllexport) DWORD NvOptimusEnablement = 1;
     __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 }
-#else
-#include <unistd.h>
 #endif
 
 namespace
 {
 std::filesystem::path executableDirectory()
 {
-#ifdef _WIN32
-    std::wstring path(32768, L'\0');
-    auto n = GetModuleFileNameW(nullptr, path.data(), DWORD(path.size()));
-
-    if (!n || n == path.size())
-        throw std::runtime_error("Cannot resolve executable path");
-    path.resize(n);
-
-    return std::filesystem::path(path).parent_path();
-#else
-    std::string path(4096, '\0');
-    auto n = readlink("/proc/self/exe", path.data(), path.size());
-
-    if (n <= 0 || std::size_t(n) == path.size())
-        throw std::runtime_error("Cannot resolve executable path");
-    path.resize(std::size_t(n));
-
-    return std::filesystem::path(path).parent_path();
-#endif
+    const char* path = SDL_GetBasePath();
+    if (!path)
+        throw std::runtime_error(std::string("Cannot resolve executable path: ") + SDL_GetError());
+    return std::filesystem::u8path(path);
 }
 
 using Clock = std::chrono::steady_clock;
@@ -53,14 +38,9 @@ double seconds(Clock::time_point start)
     return std::chrono::duration<double>(Clock::now() - start).count();
 }
 
-sf::ContextSettings contextSettings()
-{
-    return sf::ContextSettings(0, 0, 0, 4, 3, sf::ContextSettings::Core);
-}
-
 void benchmark(const std::filesystem::path& assets, rt::RenderSettings settings, bool compareCpu = true)
 {
-    sf::Context context(contextSettings(), 1, 1);
+    rt::SdlGlWindow context(1, 1, true);
     auto scene = rt::defaultScene(assets);
     rt::CameraData camera;
     rt::GpuRenderer gpu(assets);
@@ -229,9 +209,11 @@ int main(int argc, char** argv)
         if (mode == "--test-cpu")
             return rt::runCpuTests();
 
+        rt::SdlVideo video;
+
         if (mode == "--test-gpu")
         {
-            sf::Context context(contextSettings(), 1, 1);
+            rt::SdlGlWindow context(1, 1, true);
 
             return rt::runGpuTests(assets);
         }
@@ -245,12 +227,9 @@ int main(int argc, char** argv)
 
         auto scene = rt::defaultScene(assets);
         rt::CameraData camera;
-        sf::Window window(sf::VideoMode(unsigned(settings.width), unsigned(settings.height)),
-                          "Schwarzschild GPU",
-                          sf::Style::Default,
-                          contextSettings());
-        window.setVerticalSyncEnabled(true);
-        window.setKeyRepeatEnabled(false);
+        rt::SdlGlWindow window(settings.width, settings.height);
+        if (!SDL_GL_SetSwapInterval(1))
+            std::cerr << "VSync unavailable: " << SDL_GetError() << '\n';
 
         // Renderer is destroyed before window, while its GL context is still valid.
         rt::GpuRenderer renderer(assets);
@@ -258,9 +237,10 @@ int main(int argc, char** argv)
         renderer.reset(settings, camera);
         std::cout << "GPU: " << renderer.device()
                   << "\nLeft-drag to look; arrows/WASD move; Q/E rise/descend; P saves.\n";
-        bool running = true, focused = true, minimized = false, redraw = true;
+        bool running = true, minimized = false, redraw = true;
+        bool focused = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS) != 0;
         bool dragging = false;
-        sf::Vector2i mousePosition;
+        SDL_FPoint mousePosition{};
         constexpr double mouseSensitivity = 0.004;
         auto last = Clock::now(), titleTime = last;
         auto lastMovement = last;
@@ -270,39 +250,38 @@ int main(int argc, char** argv)
         while (running)
         {
             bool reset = false, tapped = false;
-            sf::Event event;
+            SDL_Event event;
 
-            while (window.pollEvent(event))
+            while (SDL_PollEvent(&event))
             {
-                if (event.type == sf::Event::Closed ||
-                    (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Escape))
+                if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED ||
+                    (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_ESCAPE))
                     running = false;
 
-                if (event.type == sf::Event::LostFocus)
+                if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
                 {
                     focused = false;
                     dragging = false;
                 }
 
-                if (event.type == sf::Event::GainedFocus)
+                if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED)
                     focused = true;
 
-                if (event.type == sf::Event::MouseButtonPressed &&
-                    event.mouseButton.button == sf::Mouse::Left && focused && !minimized)
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT &&
+                    focused && !minimized)
                 {
                     dragging = true;
-                    mousePosition = {event.mouseButton.x, event.mouseButton.y};
+                    mousePosition = {event.button.x, event.button.y};
                 }
 
-                if ((event.type == sf::Event::MouseButtonReleased &&
-                     event.mouseButton.button == sf::Mouse::Left) ||
-                    event.type == sf::Event::MouseLeft)
+                if ((event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT) ||
+                    event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE)
                     dragging = false;
 
-                if (event.type == sf::Event::MouseMoved && dragging && focused && !minimized)
+                if (event.type == SDL_EVENT_MOUSE_MOTION && dragging && focused && !minimized)
                 {
-                    sf::Vector2i position(event.mouseMove.x, event.mouseMove.y);
-                    auto delta = position - mousePosition;
+                    SDL_FPoint position{event.motion.x, event.motion.y};
+                    SDL_FPoint delta{position.x - mousePosition.x, position.y - mousePosition.y};
                     mousePosition = position;
 
                     if (delta.x != 0 || delta.y != 0)
@@ -313,31 +292,31 @@ int main(int argc, char** argv)
                 }
 
                 // Handle quick taps even if the key is released between frame polls.
-                if (event.type == sf::Event::KeyPressed && focused && !minimized)
+                if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && focused && !minimized)
                 {
                     rt::Vec3 movement;
-                    switch (event.key.code)
+                    switch (event.key.key)
                     {
-                    case sf::Keyboard::Right:
-                    case sf::Keyboard::D:
+                    case SDLK_RIGHT:
+                    case SDLK_D:
                         movement.x = 1;
                         break;
-                    case sf::Keyboard::Left:
-                    case sf::Keyboard::A:
+                    case SDLK_LEFT:
+                    case SDLK_A:
                         movement.x = -1;
                         break;
-                    case sf::Keyboard::Up:
-                    case sf::Keyboard::W:
+                    case SDLK_UP:
+                    case SDLK_W:
                         movement.z = 1;
                         break;
-                    case sf::Keyboard::Down:
-                    case sf::Keyboard::S:
+                    case SDLK_DOWN:
+                    case SDLK_S:
                         movement.z = -1;
                         break;
-                    case sf::Keyboard::Q:
+                    case SDLK_Q:
                         movement.y = 1;
                         break;
-                    case sf::Keyboard::E:
+                    case SDLK_E:
                         movement.y = -1;
                         break;
                     default:
@@ -346,27 +325,43 @@ int main(int argc, char** argv)
 
                     if (rt::dot(movement, movement) > 0)
                     {
-                        camera.moveLocal(movement, event.key.shift ? slowMovementStep : normalMovementStep);
+                        camera.moveLocal(movement,
+                                         (event.key.mod & SDL_KMOD_SHIFT) ? slowMovementStep
+                                                                          : normalMovementStep);
                         reset = true;
                         tapped = true;
                     }
                 }
 
-                if (event.type == sf::Event::Resized)
+                if (event.type == SDL_EVENT_WINDOW_MINIMIZED)
+                {
+                    minimized = true;
+                    dragging = false;
+                }
+                if (event.type == SDL_EVENT_WINDOW_RESTORED)
+                {
+                    minimized = false;
+                    redraw = true;
+                }
+                if (event.type == SDL_EVENT_WINDOW_EXPOSED)
+                    redraw = true;
+
+                if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED)
                 {
                     dragging = false;
-                    minimized = event.size.width == 0 || event.size.height == 0;
+                    minimized = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MINIMIZED) != 0 ||
+                                event.window.data1 <= 0 || event.window.data2 <= 0;
 
                     if (!minimized)
                     {
-                        auto size = renderer.fitResolution(int(event.size.width), int(event.size.height));
+                        auto size = renderer.fitResolution(int(event.window.data1), int(event.window.data2));
                         settings.width = size[0];
                         settings.height = size[1];
                         reset = true;
                     }
                 }
 
-                if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::P)
+                if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_P)
                 {
                     try
                     {
@@ -397,19 +392,17 @@ int main(int argc, char** argv)
 
             if (focused && !minimized && !tapped)
             {
-                auto key = [](sf::Keyboard::Key k)
+                auto key = [](SDL_Keycode k)
                 {
-                    return sf::Keyboard::isKeyPressed(k);
+                    return SDL_GetKeyboardState(nullptr)[SDL_GetScancodeFromKey(k, nullptr)];
                 };
-                rt::Vec3 movement((key(sf::Keyboard::Right) || key(sf::Keyboard::D)) -
-                                      (key(sf::Keyboard::Left) || key(sf::Keyboard::A)),
-                                  key(sf::Keyboard::Q) - key(sf::Keyboard::E),
-                                  (key(sf::Keyboard::Up) || key(sf::Keyboard::W)) -
-                                      (key(sf::Keyboard::Down) || key(sf::Keyboard::S)));
+                rt::Vec3 movement((key(SDLK_RIGHT) || key(SDLK_D)) - (key(SDLK_LEFT) || key(SDLK_A)),
+                                  key(SDLK_Q) - key(SDLK_E),
+                                  (key(SDLK_UP) || key(SDLK_W)) - (key(SDLK_DOWN) || key(SDLK_S)));
 
                 if (rt::dot(movement, movement) > 0)
                 {
-                    bool slow = key(sf::Keyboard::LShift) || key(sf::Keyboard::RShift);
+                    bool slow = key(SDLK_LSHIFT) || key(SDLK_RSHIFT);
                     double speed = slow ? slowMovementStep / normalMovementStep : 1.0;
                     camera.moveLocal(movement, dt * speed);
                     reset = true;
@@ -453,9 +446,10 @@ int main(int argc, char** argv)
 
             if (redraw)
             {
-                auto size = window.getSize();
-                renderer.present(int(size.x), int(size.y));
-                window.display();
+                int width = 0, height = 0;
+                rt::checkSdl(SDL_GetWindowSizeInPixels(window.get(), &width, &height), "Get drawable size");
+                renderer.present(width, height);
+                rt::checkSdl(SDL_GL_SwapWindow(window.get()), "Swap window");
                 redraw = false;
             }
 
@@ -470,7 +464,7 @@ int main(int argc, char** argv)
                       << "x" << activeSettings.height << (preview ? " preview" : " refine") << " | GPU "
                       << p.lastBatchMilliseconds << " ms | invalid " << p.failures << " | "
                       << renderer.device();
-                window.setTitle(title.str());
+                rt::checkSdl(SDL_SetWindowTitle(window.get(), title.str().c_str()), "Set window title");
                 titleTime = Clock::now();
             }
 

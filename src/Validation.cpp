@@ -1,6 +1,6 @@
 #include <GL/glew.h>
 #include "GpuRenderer.h"
-#include <SFML/Graphics/Image.hpp>
+#include "SdlSupport.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -437,11 +437,17 @@ int runGpuTests(const std::filesystem::path& assets)
                 ("schwarzschild-test-" +
                  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".png");
     savePng(path, 1, 2, {{1, 0, 0, 1}, {0, 0, 1, 1}});
-    sf::Image png;
-    require(png.loadFromFile(path.string()), "PNG export unreadable");
+    SdlSurface png(SDL_LoadPNG(path.u8string().c_str()), SDL_DestroySurface);
+    require(bool(png), "PNG export unreadable");
+    auto pixelEquals = [&](int x, int y, Uint8 r, Uint8 g, Uint8 b)
+    {
+        Uint8 actualR, actualG, actualB, actualA;
+        return SDL_ReadSurfacePixel(png.get(), x, y, &actualR, &actualG, &actualB, &actualA) &&
+               actualR == r && actualG == g && actualB == b && actualA == 255;
+    };
     std::filesystem::remove(path);
     auto bright = encodeSrgb(toneMap(1));
-    require(png.getPixel(0, 0) == sf::Color(0, 0, bright) && png.getPixel(0, 1) == sf::Color(bright, 0, 0),
+    require(pixelEquals(0, 0, 0, 0, bright) && pixelEquals(0, 1, bright, 0, 0),
             "PNG orientation/color wrong");
 
     // A resize must not replace the displayed image or change its export dimensions.
@@ -449,12 +455,15 @@ int runGpuTests(const std::filesystem::path& assets)
     settings.height = 12;
     gpu.reset(settings, camera);
     gpu.saveDisplayed(path);
-    require(png.loadFromFile(path.string()) && png.getSize() == sf::Vector2u(37, 23),
+    png.reset(SDL_LoadPNG(path.u8string().c_str()));
+    require(png && png->w == 37 && png->h == 23,
             "Export must retain displayed dimensions while the next view is pending");
     auto displayedCorner = displayColor(resized, 37, 23, 0, 22, settings.exposure);
-    require(png.getPixel(0, 0) == sf::Color(encodeSrgb(displayedCorner.x),
-                                            encodeSrgb(displayedCorner.y),
-                                            encodeSrgb(displayedCorner.z)),
+    require(pixelEquals(0,
+                        0,
+                        encodeSrgb(displayedCorner.x),
+                        encodeSrgb(displayedCorner.y),
+                        encodeSrgb(displayedCorner.z)),
             "Displayed export must preserve the previous image across resize");
     std::filesystem::remove(path);
     bool missing = false;

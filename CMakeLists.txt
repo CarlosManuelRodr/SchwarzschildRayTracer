@@ -7,7 +7,7 @@ project(
     LANGUAGES CXX
 )
 
-find_package(SFML 2.6 CONFIG REQUIRED COMPONENTS graphics window system)
+find_package(SDL3 3.4.16 EXACT CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(GLEW REQUIRED)
@@ -15,6 +15,7 @@ find_package(GLEW REQUIRED)
 add_executable(SchwarzschildRayTracer
     src/Main.cpp
     src/SceneData.cpp
+    src/StbImage.cpp
     src/Blackbody.cpp
     src/CpuRenderer.cpp
     src/GpuRenderer.cpp
@@ -24,18 +25,27 @@ add_executable(SchwarzschildRayTracer
 target_compile_features(SchwarzschildRayTracer PRIVATE cxx_std_17)
 target_link_libraries(SchwarzschildRayTracer
     PRIVATE
-        sfml-graphics
-        sfml-window
-        sfml-system
+        SDL3::SDL3
         Threads::Threads
         OpenGL::GL
         GLEW::GLEW
 )
 
+if(WIN32 AND TARGET SDL3::SDL3-shared)
+    add_custom_command(TARGET SchwarzschildRayTracer POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "$<TARGET_FILE:SDL3::SDL3-shared>"
+                "$<TARGET_FILE_DIR:SchwarzschildRayTracer>"
+        COMMENT "Copying SDL runtime"
+    )
+    install(FILES "$<TARGET_FILE:SDL3::SDL3-shared>" DESTINATION .)
+endif()
+
 if(MSVC)
     target_compile_definitions(SchwarzschildRayTracer PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(SchwarzschildRayTracer PRIVATE /W4 /permissive-)
 else()
+    set_source_files_properties(src/StbImage.cpp PROPERTIES COMPILE_OPTIONS -w)
     target_compile_options(SchwarzschildRayTracer PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 

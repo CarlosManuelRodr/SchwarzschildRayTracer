@@ -1,5 +1,8 @@
 #include "SceneData.h"
-#include <SFML/Graphics/Image.hpp>
+#include "SdlSupport.h"
+#include "stb_image.h"
+#include <fstream>
+#include <limits>
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -180,21 +183,29 @@ SceneData defaultScene(const std::filesystem::path& assets)
     SceneData s;
     auto image = [&](const char* name)
     {
-        sf::Image img;
         auto path = assets / "textures" / name;
-
-        if (!img.loadFromFile(path.string()))
-            throw std::runtime_error("Cannot load texture: " + path.string());
-        auto size = img.getSize();
+        // Read with filesystem::path to support Unicode asset paths on Windows.
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
+        const auto length = file ? std::streamoff(file.tellg()) : std::streamoff(-1);
+        if (length <= 0 || length > std::numeric_limits<int>::max())
+            throw std::runtime_error("Cannot read texture: " + path.string());
+        std::vector<stbi_uc> encoded(static_cast<std::size_t>(length));
+        file.seekg(0);
+        if (!file.read(reinterpret_cast<char*>(encoded.data()), length))
+            throw std::runtime_error("Cannot read texture: " + path.string());
+        int width = 0, height = 0, channels = 0;
+        std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> pixels(
+            stbi_load_from_memory(encoded.data(), int(length), &width, &height, &channels, 4),
+            stbi_image_free);
+        if (!pixels)
+            throw std::runtime_error("Cannot decode texture: " + path.string());
         TextureData t;
         t.kindChildren.x = Image;
-        t.image = {int(s.texels.size()), int(size.x), int(size.y), 0};
-        auto pixels = img.getPixelsPtr();
-
-        for (std::size_t i = 0; i < std::size_t(size.x) * size.y; ++i)
-            s.texels.push_back({decodeSrgb(pixels[4 * i] / 255.f),
-                                decodeSrgb(pixels[4 * i + 1] / 255.f),
-                                decodeSrgb(pixels[4 * i + 2] / 255.f),
+        t.image = {int(s.texels.size()), width, height, 0};
+        for (std::size_t i = 0; i < std::size_t(width) * height; ++i)
+            s.texels.push_back({decodeSrgb(pixels.get()[4 * i] / 255.f),
+                                decodeSrgb(pixels.get()[4 * i + 1] / 255.f),
+                                decodeSrgb(pixels.get()[4 * i + 2] / 255.f),
                                 0});
         s.textures.push_back(t);
 
@@ -258,9 +269,9 @@ void savePng(const std::filesystem::path& path,
              const std::vector<Float4>& linear,
              float exposure)
 {
-    if (linear.size() != std::size_t(width) * height)
+    if (width <= 0 || height <= 0 || linear.size() != std::size_t(width) * height)
         throw std::runtime_error("Wrong image size for PNG export");
-    std::vector<sf::Uint8> rgba(linear.size() * 4);
+    std::vector<Uint8> rgba(linear.size() * 4);
 
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x)
@@ -275,10 +286,10 @@ void savePng(const std::filesystem::path& path,
 
     if (!path.parent_path().empty())
         std::filesystem::create_directories(path.parent_path());
-    sf::Image image;
-    image.create(unsigned(width), unsigned(height), rgba.data());
-
-    if (!image.saveToFile(path.string()))
-        throw std::runtime_error("Cannot save PNG: " + path.string());
+    SdlSurface image(SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGBA32, rgba.data(), width * 4),
+                     SDL_DestroySurface);
+    checkSdl(bool(image), "Create PNG surface");
+    if (!SDL_SavePNG(image.get(), path.u8string().c_str()))
+        throw std::runtime_error("Cannot save PNG: " + path.string() + ": " + SDL_GetError());
 }
 } // namespace rt

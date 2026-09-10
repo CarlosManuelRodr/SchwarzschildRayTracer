@@ -3,7 +3,7 @@ Ray tracer con desviación relativista de rayos de luz basado en la métrica de 
 
 El renderizador actual usa **OpenGL 4.3 compute shaders** para trazar los rayos,
 integrar sus trayectorias y acumular muestras en la GPU. La ventana muestra un
-render progresivo; C++ y SFML se encargan de los controles y la exportación PNG.
+render progresivo; C++ y SDL se encargan de los controles y la exportación PNG.
 
 ![ExampleImage](https://raw.githubusercontent.com/CarlosManuelRodr/SchwarzschildRayTracer/master/Images/Animation.gif)
 
@@ -27,8 +27,9 @@ Se puede encontrar información adicional en el siguiente artículo:
 ## Compilación
 
 El proyecto usa CMake y [vcpkg](https://vcpkg.io/) en Windows y Linux. El
-manifiesto `vcpkg.json` instala automáticamente SFML 2.6.2 y GLEW durante la
-configuración.
+manifiesto `vcpkg.json` instala automáticamente SDL 3.4.16 y GLEW durante la
+configuración. SDL se fija a la versión exacta 3.4.16 tanto en el manifiesto
+como en CMake.
 
 Requisitos:
 
@@ -55,6 +56,13 @@ cmake -S . -B build \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
+
+SDL gestiona la ventana, el contexto OpenGL, los eventos de teclado/ratón y
+la exportación PNG con [`SDL_SavePNG`](https://wiki.libsdl.org/SDL3/SDL_SavePNG).
+Las texturas JPEG usan `stb_image.h`, ya incluido en el repositorio: SDL 3.4.16
+solo carga BMP/PNG de forma integrada. No se necesita SDL_image.
+Esta migración conserva el backend OpenGL 4.3 de escritorio. La compilación
+WebAssembly y un backend compatible con navegador quedan para una etapa posterior.
 
 ## Uso
 

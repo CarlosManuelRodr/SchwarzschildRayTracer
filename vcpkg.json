@@ -2,21 +2,15 @@
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "schwarzschild-ray-tracer",
   "version-semver": "1.0.0",
-  "builtin-baseline": "04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4",
+  "builtin-baseline": "e5f2217e820e83d98266f4674e6c0bb3fbb6cfd7",
   "dependencies": [
     "glew",
-    {
-      "name": "sfml",
-      "default-features": false,
-      "features": [
-        "graphics"
-      ]
-    }
+    "sdl3"
   ],
   "overrides": [
     {
-      "name": "sfml",
-      "version": "2.6.2"
+      "name": "sdl3",
+      "version": "3.4.16"
     }
   ]
 }
