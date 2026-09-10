@@ -2,6 +2,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include "SdlSupport.h"
+#include "SettingsPanel.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -192,7 +193,8 @@ int main(int argc, char** argv)
                     << "  --exposure N | --no-redshift\n"
                     << "  --slow-step N (Shift movement per tap; default 0.0005; held speed 20*N units/s)\n"
                     << "  --full-scene-integration | --adaptative (default: fixed radius)\n"
-                    << "Left-drag looks; arrows/WASD move; Q/E rise/descend; P saves; Escape exits.\n";
+                    << "Left-drag looks; arrows/WASD move; Q/E rise/descend; P saves; F1 toggles settings; "
+                       "Escape exits.\n";
                 return 0;
             }
             else
@@ -235,9 +237,11 @@ int main(int argc, char** argv)
         rt::GpuRenderer renderer(assets);
         renderer.uploadScene(scene);
         renderer.reset(settings, camera);
-        std::cout << "GPU: " << renderer.device()
-                  << "\nLeft-drag to look; arrows/WASD move; Q/E rise/descend; P saves.\n";
-        bool running = true, minimized = false, redraw = true;
+        rt::SettingsPanel panel(window.get(), settings);
+        std::cout
+            << "GPU: " << renderer.device()
+            << "\nLeft-drag to look; arrows/WASD move; Q/E rise/descend; P saves; F1 toggles settings.\n";
+        bool running = true, minimized = false;
         bool focused = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS) != 0;
         bool dragging = false;
         SDL_FPoint mousePosition{};
@@ -246,6 +250,28 @@ int main(int argc, char** argv)
         auto lastMovement = last;
         bool preview = false, cameraPending = false;
         auto activeSettings = settings;
+        auto pendingSettings = settings;
+        bool pendingMatchWindow = true;
+        bool renderSettingsPending = false;
+        bool matchWindow = true;
+        auto lastSettingsEdit = last;
+        auto saveImage = [&]
+        {
+            try
+            {
+                auto stamp = std::chrono::duration_cast<std::chrono::microseconds>(
+                                 std::chrono::system_clock::now().time_since_epoch())
+                                 .count();
+                auto path = executableDirectory() / "Output" / ("img-" + std::to_string(stamp) + ".png");
+                renderer.saveDisplayed(path);
+                panel.setStatus("Saved " + path.u8string());
+                std::cout << "Saved " << path << std::endl;
+            }
+            catch (const std::exception& error)
+            {
+                panel.setStatus(error.what(), true);
+            }
+        };
 
         while (running)
         {
@@ -254,8 +280,14 @@ int main(int argc, char** argv)
 
             while (SDL_PollEvent(&event))
             {
+                panel.processEvent(event);
+                const bool captureMouse = panel.capturesMouse();
+                const bool captureKeyboard = panel.capturesKeyboard();
+                if (captureMouse)
+                    dragging = false;
                 if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED ||
-                    (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_ESCAPE))
+                    (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_ESCAPE &&
+                     !captureKeyboard))
                     running = false;
 
                 if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
@@ -268,7 +300,7 @@ int main(int argc, char** argv)
                     focused = true;
 
                 if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT &&
-                    focused && !minimized)
+                    focused && !minimized && !captureMouse)
                 {
                     dragging = true;
                     mousePosition = {event.button.x, event.button.y};
@@ -278,7 +310,8 @@ int main(int argc, char** argv)
                     event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE)
                     dragging = false;
 
-                if (event.type == SDL_EVENT_MOUSE_MOTION && dragging && focused && !minimized)
+                if (event.type == SDL_EVENT_MOUSE_MOTION && dragging && focused && !minimized &&
+                    !captureMouse)
                 {
                     SDL_FPoint position{event.motion.x, event.motion.y};
                     SDL_FPoint delta{position.x - mousePosition.x, position.y - mousePosition.y};
@@ -292,7 +325,8 @@ int main(int argc, char** argv)
                 }
 
                 // Handle quick taps even if the key is released between frame polls.
-                if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && focused && !minimized)
+                if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && focused && !minimized &&
+                    !captureKeyboard)
                 {
                     rt::Vec3 movement;
                     switch (event.key.key)
@@ -341,10 +375,8 @@ int main(int argc, char** argv)
                 if (event.type == SDL_EVENT_WINDOW_RESTORED)
                 {
                     minimized = false;
-                    redraw = true;
                 }
-                if (event.type == SDL_EVENT_WINDOW_EXPOSED)
-                    redraw = true;
+
 
                 if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED)
                 {
@@ -352,36 +384,19 @@ int main(int argc, char** argv)
                     minimized = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MINIMIZED) != 0 ||
                                 event.window.data1 <= 0 || event.window.data2 <= 0;
 
-                    if (!minimized)
+                    if (!minimized && matchWindow)
                     {
                         auto size = renderer.fitResolution(int(event.window.data1), int(event.window.data2));
                         settings.width = size[0];
                         settings.height = size[1];
+                        panel.syncResolution(settings.width, settings.height);
                         reset = true;
                     }
                 }
 
-                if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_P)
-                {
-                    try
-                    {
-                        auto stamp = std::chrono::duration_cast<std::chrono::microseconds>(
-                                         std::chrono::system_clock::now().time_since_epoch())
-                                         .count();
-                        auto path =
-                            executableDirectory() / "Output" / ("img-" + std::to_string(stamp) + ".png");
-
-                        if (!minimized)
-                        {
-                            renderer.saveDisplayed(path);
-                            std::cout << "Saved " << path << std::endl;
-                        }
-                    }
-                    catch (const std::exception& error)
-                    {
-                        std::cerr << "Export failed: " << error.what() << std::endl;
-                    }
-                }
+                if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_P &&
+                    !captureKeyboard && !minimized)
+                    saveImage();
             }
 
             if (!running)
@@ -390,7 +405,50 @@ int main(int argc, char** argv)
             double dt = std::min(0.05, std::chrono::duration<double>(now - last).count());
             last = now;
 
-            if (focused && !minimized && !tapped)
+            if (minimized)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+
+            panel.beginFrame();
+            auto actions = panel.draw(slowMovementStep, renderer.progress(), activeSettings, preview);
+            if (actions.save)
+                saveImage();
+            if (actions.renderChanged)
+            {
+                try
+                {
+                    auto requested = panel.requestedSettings();
+                    if (panel.followsWindow())
+                    {
+                        int width = 0, height = 0;
+                        rt::checkSdl(SDL_GetWindowSizeInPixels(window.get(), &width, &height),
+                                     "Get drawable size");
+                        auto size = renderer.fitResolution(width, height);
+                        requested.width = size[0];
+                        requested.height = size[1];
+                    }
+                    requested.validate();
+                    const auto supported = renderer.fitResolution(requested.width, requested.height);
+                    if (supported[0] != requested.width || supported[1] != requested.height)
+                        throw std::runtime_error(
+                            "Resolution exceeds GPU memory budget. Reduce width or height.");
+                    pendingSettings = requested;
+                    pendingMatchWindow = panel.followsWindow();
+                    panel.syncResolution(requested.width, requested.height);
+                    renderSettingsPending = true;
+                    lastSettingsEdit = now;
+                    panel.setStatus("Updating render...");
+                }
+                catch (const std::exception& error)
+                {
+                    renderSettingsPending = false;
+                    panel.setStatus(error.what(), true);
+                }
+            }
+
+            if (focused && !tapped && !panel.capturesKeyboard())
             {
                 auto key = [](SDL_Keycode k)
                 {
@@ -415,14 +473,18 @@ int main(int argc, char** argv)
                 lastMovement = now;
             }
 
-            if (minimized)
+            renderer.poll();
+            if (renderSettingsPending && seconds(lastSettingsEdit) >= 0.15)
             {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
+                settings = pendingSettings;
+                matchWindow = pendingMatchWindow;
+                preview = false;
+                activeSettings = settings;
+                renderer.reset(activeSettings, camera);
+                cameraPending = false;
+                renderSettingsPending = false;
+                panel.setStatus("Rendering updated settings.");
             }
-
-            if (renderer.poll() && renderer.progress().firstPassComplete)
-                redraw = true;
 
             // Finish each preview even if newer input arrives. Otherwise a held
             // key would continually cancel the slow rays and no preview would finish.
@@ -441,16 +503,14 @@ int main(int argc, char** argv)
 
                 renderer.reset(activeSettings, camera);
                 cameraPending = false;
-                redraw = true;
             }
 
-            if (redraw)
             {
                 int width = 0, height = 0;
                 rt::checkSdl(SDL_GetWindowSizeInPixels(window.get(), &width, &height), "Get drawable size");
                 renderer.present(width, height);
+                panel.render();
                 rt::checkSdl(SDL_GL_SwapWindow(window.get()), "Swap window");
-                redraw = false;
             }
 
             renderer.dispatch();
@@ -459,9 +519,13 @@ int main(int argc, char** argv)
             {
                 const auto& p = renderer.progress();
                 std::ostringstream title;
-                title << "Schwarzschild | " << integrationName << " | " << std::fixed << std::setprecision(1)
-                      << p.meanSamples << "/" << activeSettings.samples << " spp | " << activeSettings.width
-                      << "x" << activeSettings.height << (preview ? " preview" : " refine") << " | GPU "
+                title << "Schwarzschild | "
+                      << (settings.integrationMode == rt::RenderSettings::FixedRadius ? "fixed radius"
+                          : settings.integrationMode == rt::RenderSettings::FullScene ? "full scene"
+                                                                                      : "adaptive cutoff")
+                      << " | " << std::fixed << std::setprecision(1) << p.meanSamples << "/"
+                      << activeSettings.samples << " spp | " << activeSettings.width << "x"
+                      << activeSettings.height << (preview ? " preview" : " refine") << " | GPU "
                       << p.lastBatchMilliseconds << " ms | invalid " << p.failures << " | "
                       << renderer.device();
                 rt::checkSdl(SDL_SetWindowTitle(window.get(), title.str().c_str()), "Set window title");

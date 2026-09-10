@@ -155,8 +155,8 @@ struct RenderSettings
     };
 
     IntegrationMode integrationMode = FixedRadius;
-    int width = 800;
-    int height = 600;
+    int width = 1440;
+    int height = 900;
     int samples = 30;
     std::uint32_t seed = 1;
     bool redshift = true;

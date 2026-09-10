@@ -8,12 +8,14 @@ project(
 )
 
 find_package(SDL3 3.4.16 EXACT CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(GLEW REQUIRED)
 
 add_executable(SchwarzschildRayTracer
     src/Main.cpp
+    src/SettingsPanel.cpp
     src/SceneData.cpp
     src/StbImage.cpp
     src/Blackbody.cpp
@@ -26,6 +28,7 @@ target_compile_features(SchwarzschildRayTracer PRIVATE cxx_std_17)
 target_link_libraries(SchwarzschildRayTracer
     PRIVATE
         SDL3::SDL3
+        imgui::imgui
         Threads::Threads
         OpenGL::GL
         GLEW::GLEW

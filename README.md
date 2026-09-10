@@ -27,7 +27,7 @@ Se puede encontrar información adicional en el siguiente artículo:
 ## Compilación
 
 El proyecto usa CMake y [vcpkg](https://vcpkg.io/) en Windows y Linux. El
-manifiesto `vcpkg.json` instala automáticamente SDL 3.4.16 y GLEW durante la
+manifiesto `vcpkg.json` instala automáticamente SDL 3.4.16, Dear ImGui y GLEW durante la
 configuración. SDL se fija a la versión exacta 3.4.16 tanto en el manifiesto
 como en CMake.
 
@@ -65,6 +65,29 @@ Esta migración conserva el backend OpenGL 4.3 de escritorio. La compilación
 WebAssembly y un backend compatible con navegador quedan para una etapa posterior.
 
 ## Uso
+
+Al iniciar se abre una ventana de **1440×900** con un panel **Dear ImGui** sobre el render. Los cambios válidos
+se aplican automáticamente; las opciones de render reinician las muestras tras
+150 ms sin editar, conservando la última imagen completa. No hay botón de aplicar.
+
+- **Rendering:** selector de integración (Fixed radius, Full scene, Adaptive cutoff),
+  redshift, muestras y exposición.
+- **Resolution and sampling:** semilla y resolución. Desactiva *Match window resolution*
+  para elegir una resolución interna independiente del tamaño de la ventana.
+- **Navigation:** deslizador logarítmico de *Slow step*. Ctrl+clic permite escribir
+  en el deslizador; *Step value* admite valores exactos (0 < valor < 0.05).
+  La velocidad de precisión cambia inmediatamente, sin reiniciar el render.
+- **Save PNG:** exporta la imagen mostrada, sin incluir el panel. Los errores y la
+  ruta del archivo aparecen en el panel.
+
+La flecha del título colapsa el panel; **F1** lo oculta o vuelve a mostrar, incluso
+si se cerró con X. Las secciones también se pueden colapsar. Mientras se editan
+controles, el teclado y el ratón quedan capturados por la interfaz y no mueven
+la cámara. `SettingsPanel` mantiene los widgets y sus valores separados del bucle
+de render, para añadir nuevas secciones sin mezclar su código con OpenGL.
+
+Las opciones de consola se conservan para compatibilidad, configuración inicial,
+pruebas y renders por lotes; el uso interactivo no necesita argumentos:
 
 ```powershell
 .\build\Release\SchwarzschildRayTracer.exe
@@ -112,7 +135,8 @@ el benchmark CPU. La ventana interactiva conserva la exportación manual con P.
 | Q / E | Subir / bajar la cámara y su objetivo |
 | Shift + flechas / WASD / Q / E | Movimiento de precisión (100 veces más lento por defecto) |
 | P | Guardar las muestras disponibles como PNG en `Output/`, junto al ejecutable |
-| Escape | Salir |
+| F1 | Ocultar / mostrar el panel de ajustes |
+| Escape | Salir (si la interfaz no está capturando el teclado) |
 
 Durante la navegación se calculan vistas previas de una muestra a un cuarto del
 ancho y alto de render (200×150 para una ventana de 800×600). Solo se muestran al

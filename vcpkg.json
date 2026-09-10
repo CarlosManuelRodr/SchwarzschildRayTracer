@@ -5,7 +5,14 @@
   "builtin-baseline": "e5f2217e820e83d98266f4674e6c0bb3fbb6cfd7",
   "dependencies": [
     "glew",
-    "sdl3"
+    "sdl3",
+    {
+      "name": "imgui",
+      "features": [
+        "sdl3-binding",
+        "opengl3-binding"
+      ]
+    }
   ],
   "overrides": [
     {
