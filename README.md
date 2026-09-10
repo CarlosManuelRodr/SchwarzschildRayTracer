@@ -87,6 +87,11 @@ final por píxel ni de visibilidad idéntica en siluetas rasantes. Puede costar 
 como la integración completa cuando no logra descartar suficiente curvatura.
 
 `--exposure N` controla la exposición lineal (positivo; 1 por defecto).
+`--slow-step N` configura la distancia de un toque con Shift, en radios de horizonte
+(0 < N < 0.05; predeterminado 0.0005). Mantener las teclas mueve a 20*N unidades
+por segundo; ambos Shift funcionan y pueden pulsarse/soltarse durante el movimiento.
+Por ejemplo, `--slow-step 0.0001` permite pasos de 0.0001 y velocidad de 0.002
+unidades por segundo mientras se mantiene Shift.
 `--no-redshift` desactiva los cambios gravitatorios y Doppler para comparar.
 `--render` guarda un render GPU en `Output/render-gpu.png` y termina, sin ejecutar
 el benchmark CPU. La ventana interactiva conserva la exportación manual con P.
@@ -97,6 +102,7 @@ el benchmark CPU. La ventana interactiva conserva la exportación manual con P.
 | ↑ / W, ↓ / S | Avanzar / retroceder en la dirección de la vista |
 | ← / A, → / D | Desplazarse lateralmente respecto a la vista |
 | Q / E | Subir / bajar la cámara y su objetivo |
+| Shift + flechas / WASD / Q / E | Movimiento de precisión (100 veces más lento por defecto) |
 | P | Guardar las muestras disponibles como PNG en `Output/`, junto al ejecutable |
 | Escape | Salir |
 

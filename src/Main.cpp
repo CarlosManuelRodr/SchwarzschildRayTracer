@@ -137,6 +137,8 @@ int main(int argc, char** argv)
     {
         rt::RenderSettings settings;
         std::string mode;
+        constexpr double normalMovementStep = 0.05;
+        double slowMovementStep = 0.0005;
         auto assets = executableDirectory() / "assets";
 
         for (int i = 1; i < argc; ++i)
@@ -165,6 +167,16 @@ int main(int argc, char** argv)
                 settings.exposure = std::stof(argv[i], &used);
                 if (used != std::string(argv[i]).size())
                     throw std::runtime_error("Invalid exposure");
+            }
+            else if (arg == "--slow-step")
+            {
+                if (++i >= argc)
+                    throw std::runtime_error("Missing value for --slow-step");
+                std::size_t used = 0;
+                slowMovementStep = std::stod(argv[i], &used);
+                if (used != std::string(argv[i]).size() || !std::isfinite(slowMovementStep) ||
+                    slowMovementStep <= 0 || slowMovementStep >= normalMovementStep)
+                    throw std::runtime_error("--slow-step must be greater than 0 and less than 0.05");
             }
             else if (arg == "--width" || arg == "--height" || arg == "--samples" || arg == "--seed" ||
                      arg == "--assets")
@@ -198,6 +210,7 @@ int main(int argc, char** argv)
                     << "SchwarzschildRayTracer [--width N --height N --samples N --seed N --assets DIR]\n"
                     << "  --test-cpu | --test-gpu | --benchmark | --render\n"
                     << "  --exposure N | --no-redshift\n"
+                    << "  --slow-step N (Shift movement per tap; default 0.0005; held speed 20*N units/s)\n"
                     << "  --full-scene-integration | --adaptative (default: fixed radius)\n"
                     << "Left-drag looks; arrows/WASD move; Q/E rise/descend; P saves; Escape exits.\n";
                 return 0;
@@ -333,7 +346,7 @@ int main(int argc, char** argv)
 
                     if (rt::dot(movement, movement) > 0)
                     {
-                        camera.moveLocal(movement, 0.05);
+                        camera.moveLocal(movement, event.key.shift ? slowMovementStep : normalMovementStep);
                         reset = true;
                         tapped = true;
                     }
@@ -396,7 +409,9 @@ int main(int argc, char** argv)
 
                 if (rt::dot(movement, movement) > 0)
                 {
-                    camera.moveLocal(movement, dt);
+                    bool slow = key(sf::Keyboard::LShift) || key(sf::Keyboard::RShift);
+                    double speed = slow ? slowMovementStep / normalMovementStep : 1.0;
+                    camera.moveLocal(movement, dt * speed);
                     reset = true;
                 }
             }
