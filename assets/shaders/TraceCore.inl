@@ -12,6 +12,8 @@ struct TraceState
     real h2;
     real step;
     real observerLapse;
+    real energy;
+    int observerMode; // 0: legacy fixture, 1: exterior observer, 3: horizon/interior observer.
     int field;
     int attempts;
     int depth;
@@ -185,6 +187,44 @@ void initTrace(OUT(TraceState) s, vec3 p, vec3 v, uint seed)
     s.status = 0;
     s.rng = seed;
     s.observerLapse = lapseAt(p);
+    s.energy = s.observerLapse;
+    s.observerMode = 0;
+
+    if (observerFrameEnabled())
+    {
+        // The pixel points toward the source. The arriving future-directed
+        // photon points the other way and has unit frequency in the camera.
+        vec3 incoming = -s.v;
+        vec3 beta = observerVelocity();
+        real gamma = real(1) / sqrt(real(1) - dot(beta, beta));
+        real projection = dot(beta, incoming);
+        real frequency = gamma * (real(1) + projection);
+        vec3 momentum = incoming + (gamma + gamma * gamma / (gamma + real(1)) * projection) * beta;
+        vec3 flow = vec3(0);
+        s.observerMode = 1;
+        int hole = blackHole();
+        if (hole >= 0)
+        {
+            vec3 relative = p - sphereCenter(hole);
+            real radius = length(relative);
+            if (radius <= real(1e-4))
+            {
+                s.status = 3; // The singularity has no observer frame.
+                return;
+            }
+            flow = relative / (radius * sqrt(radius));
+            if (radius <= real(1))
+                s.observerMode = 3;
+        }
+
+        // Past-directed affine spatial tangent in ingoing Painleve-Gullstrand
+        // coordinates. This remains finite on the future event horizon.
+        s.v = flow * frequency - momentum;
+        s.energy = frequency - dot(flow, momentum);
+        s.observerLapse = redshiftEnabled() ? s.energy : real(1);
+        if (s.energy <= real(0))
+            s.status = 3; // No positive-energy exterior source on this past ray.
+    }
 }
 
 void failTrace(INOUT(TraceState) s)
@@ -224,7 +264,7 @@ void scatterSurface(INOUT(TraceState) s, SurfaceHit hit)
         return;
     }
     ++s.depth;
-    vec3 d = safeUnit(s.v), n = hit.normal;
+    vec3 d = staticDirection(hit.p, s.v), n = hit.normal;
 
     if (kind == 0)
     {
@@ -264,7 +304,25 @@ void scatterSurface(INOUT(TraceState) s, SurfaceHit hit)
 
     if (dot(s.v, s.v) < real(1e-20))
         s.v = n;
-    s.p = hit.p + EPS * s.v;
+    s.p = hit.p + EPS * safeUnit(s.v);
+    if (s.observerMode != 0)
+    {
+        vec3 radial = vec3(0);
+        real lapse = real(1);
+        if (blackHole() >= 0)
+        {
+            vec3 offset = hit.p - sphereCenter(blackHole());
+            real radius = length(offset);
+            if (radius <= real(1))
+            {
+                s.status = 3; // Stationary material frames do not exist inside.
+                return;
+            }
+            radial = offset / radius;
+            lapse = sqrt(real(1) - real(1) / radius);
+        }
+        s.v = s.energy / lapse * (s.v + (lapse - real(1)) * dot(s.v, radial) * radial);
+    }
 
     // Reinitialize angular momentum after a physical surface scattering.
     s.field = -1;
@@ -352,7 +410,7 @@ void integrateField(INOUT(TraceState) s)
 {
     vec3 center = sphereCenter(s.field);
 
-    if (length(s.p - center) <= real(1))
+    if (length(s.p - center) <= (s.observerMode >= 2 ? real(1e-4) : real(1)))
     {
         s.status = 3;
 
@@ -371,8 +429,8 @@ void integrateField(INOUT(TraceState) s)
 
     // maxStep is the near-hole step scale. Far away, let steps grow smoothly
     // with radius, but never cross a large fraction of the radial scale at once.
-    real stepLimit = maximumStep();
-    if (integrationMode() != 0)
+    real stepLimit = maximumStep() / (s.observerMode != 0 ? max(real(1), speed) : real(1));
+    if (integrationMode() != 0 || s.observerMode >= 2)
     {
         stepLimit = min(maximumStep() * max(real(1), radius * radius / real(9)), real(0.1) * radius / speed);
         real backgroundRadius = real(10);
@@ -393,7 +451,7 @@ void integrateField(INOUT(TraceState) s)
         if (diskEnabled())
             backgroundRadius = max(backgroundRadius, diskOuter() + real(1));
 
-        if (integrationMode() == 2 && negligibleBending(s, backgroundRadius))
+        if (integrationMode() == 2 && s.observerMode < 2 && negligibleBending(s, backgroundRadius))
         {
             s.field = -2; // The remaining straight flight has passed the error check.
             s.v = safeUnit(s.v);
@@ -406,8 +464,9 @@ void integrateField(INOUT(TraceState) s)
         {
             s.v = safeUnit(s.v);
             real sky = real(0.5) * (s.v.y + real(1));
-            s.radiance +=
-                s.throughput * ((real(1) - sky) * vec3(1) + sky * vec3(real(0.5), real(0.7), real(1)));
+            real skyShift = s.observerMode != 0 ? pow(lapseAt(s.p) / s.observerLapse, real(4)) : real(1);
+            s.radiance += skyShift * s.throughput *
+                          ((real(1) - sky) * vec3(1) + sky * vec3(real(0.5), real(0.7), real(1)));
             s.status = 1;
             return;
         }
@@ -460,7 +519,8 @@ void integrateField(INOUT(TraceState) s)
         eventKind = 1;
     }
 
-    if (sphereRoot(s.p, delta, center, real(1), real(0), eventT, t))
+    if (sphereRoot(s.p, delta, center, real(1), real(0), eventT, t) &&
+        (s.observerMode < 2 || dot(s.p + t * delta - center, delta) < real(0)))
     {
         eventT = t;
         eventKind = 2;
@@ -472,7 +532,7 @@ void integrateField(INOUT(TraceState) s)
         eventKind = 4;
     }
 
-    if (integrationMode() == 0 && length(pn - center) >= sphereRadius(s.field) &&
+    if (integrationMode() == 0 && s.observerMode < 2 && length(pn - center) >= sphereRadius(s.field) &&
         dot(delta, pn - center) > real(0) &&
         sphereRoot(s.p, delta, center, sphereRadius(s.field), real(1e-7), eventT, t))
     {
@@ -506,11 +566,13 @@ void integrateField(INOUT(TraceState) s)
         s.radiance += s.throughput * diskRadiance(s.p, -s.v, s.observerLapse);
         s.status = 1;
     }
-    else if (integrationMode() == 0 && (eventKind == 3 || (length(s.p - center) >= sphereRadius(s.field) &&
-                                                           dot(s.p - center, s.v) > real(0))))
+    else if (integrationMode() == 0 && s.observerMode < 2 &&
+             (eventKind == 3 ||
+              (length(s.p - center) >= sphereRadius(s.field) && dot(s.p - center, s.v) > real(0))))
     {
-        s.v = safeUnit(s.v);
-        s.p += EPS * s.v;
+        if (s.observerMode == 0)
+            s.v = safeUnit(s.v);
+        s.p += EPS * safeUnit(s.v);
         s.field = -1;
     }
 }
@@ -537,7 +599,8 @@ void advanceTrace(INOUT(TraceState) s)
     for (int i = 0; i < sphereCount(); ++i)
     {
         if (s.field != -2 && materialKind(sphereMaterial(i)) == 4 &&
-            (integrationMode() != 0 || length(s.p - sphereCenter(i)) < sphereRadius(i)))
+            (integrationMode() != 0 || s.observerMode >= 2 ||
+             length(s.p - sphereCenter(i)) < sphereRadius(i)))
         {
             enterField(s, i);
 
@@ -551,7 +614,7 @@ void advanceTrace(INOUT(TraceState) s)
     real maximum = hitWorld ? hit.t : real(1e30);
     real diskDistance = real(0);
     bool hitDisk = diskHit(s.p, s.v, EPS, maximum, diskDistance);
-    transferAtmosphere(s, safeUnit(s.v), hitDisk ? diskDistance : maximum);
+    transferAtmosphere(s, safeUnit(s.v), (hitDisk ? diskDistance : maximum) * length(s.v));
 
     if (hitDisk)
     {
@@ -564,7 +627,9 @@ void advanceTrace(INOUT(TraceState) s)
     if (!hitWorld)
     {
         real t = real(0.5) * (safeUnit(s.v).y + real(1));
-        s.radiance += s.throughput * ((real(1) - t) * vec3(1) + t * vec3(real(0.5), real(0.7), real(1)));
+        real skyShift = s.observerMode != 0 ? pow(real(1) / s.observerLapse, real(4)) : real(1);
+        s.radiance +=
+            skyShift * s.throughput * ((real(1) - t) * vec3(1) + t * vec3(real(0.5), real(0.7), real(1)));
         s.status = 1;
 
         return;

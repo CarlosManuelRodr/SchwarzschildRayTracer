@@ -119,6 +119,17 @@ vec3 diskRadiance(vec3 position, vec3 photonDirection, real observerLapse)
     return diskScale() * blackbody(diskTemperature(radius) * temperatureVariation * shift);
 }
 
+vec3 staticDirection(vec3 position, vec3 direction)
+{
+    if (!observerFrameEnabled() || blackHole() < 0)
+        return safeUnit(direction);
+    vec3 offset = position - sphereCenter(blackHole());
+    real radius = length(offset);
+    vec3 radial = offset / max(radius, real(1e-8));
+    real lapse = sqrt(max(real(1e-8), real(1) - real(1) / max(radius, real(1))));
+    return safeUnit(direction + (real(1) / lapse - real(1)) * dot(direction, radial) * radial);
+}
+
 vec3 surfaceRadiance(SurfaceHit hit, vec3 photonDirection, real observerLapse)
 {
     int material = sphereMaterial(hit.sphere);
@@ -128,7 +139,7 @@ vec3 surfaceRadiance(SurfaceHit hit, vec3 photonDirection, real observerLapse)
     if (emission.x <= real(0))
         return textureValue(materialTexture(material), hit.u, hit.v, hit.p) * pow(shift, real(4));
 
-    real cosine = max(real(0), dot(hit.normal, safeUnit(photonDirection)));
+    real cosine = max(real(0), dot(hit.normal, staticDirection(hit.p, photonDirection)));
     real limb = (real(1) - emission.z * (real(1) - cosine)) / (real(1) - emission.z / real(3));
     return emission.y * limb * blackbody(emission.x * shift);
 }
@@ -187,7 +198,7 @@ vec3 atmosphereTransmission(vec3 origin, vec3 direction, real maximum);
 vec3 illuminateEarth(INOUT(TraceState) state, SurfaceHit hit, vec3 albedo)
 {
     vec3 result = vec3(0);
-    vec3 view = -safeUnit(state.v);
+    vec3 view = -staticDirection(hit.p, state.v);
     vec3 origin = hit.p + EPS * hit.normal;
 
     // Sample the solid angle of each spherical source: finite area, soft shadows,

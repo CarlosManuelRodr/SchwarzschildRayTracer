@@ -88,6 +88,9 @@ unsigned char encodeSrgb(double v)
 
 void RenderSettings::validate() const
 {
+    double speedSquared = dot(observerVelocity, observerVelocity);
+    if (!std::isfinite(speedSquared) || speedSquared > 0.999 * 0.999 + 1e-12)
+        throw std::runtime_error("Observer speed must not exceed 0.999c");
     if (integrationMode < FixedRadius || integrationMode > AdaptiveCutoff)
         throw std::runtime_error("Invalid integration mode");
     if (width <= 0 || height <= 0 || width > 8192 || height > 8192 || samples <= 0 || samples > 1000000 ||

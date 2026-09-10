@@ -107,6 +107,7 @@ int runCpuTests()
             "Pitch clamping must preserve focus distance and a valid basis");
 
     RenderSettings settings;
+    settings.useObserverFrame = false;
     require(settings.integrationMode == RenderSettings::FixedRadius, "Fixed radius must be the default");
     settings.integrationMode = RenderSettings::FullScene;
     auto field = fieldScene();
@@ -208,6 +209,53 @@ int runCpuTests()
     auto shadow = traceCpu(earth, settings, {0, 0, 3}, {0, 0, -1});
     require(dot(shadow.color, shadow.color) < 0.1 * dot(lit.color, lit.color),
             "Area-light shadows must block sunlight");
+    auto observerScene = fieldScene();
+    observerScene.textures[0].color = {1, 1, 1, 0};
+    observerScene.materials.push_back({{Environment, 0, 0, 0}, {1, 0, 0, 0}});
+    observerScene.spheres.push_back({{0, 0, 0, 20}, {1, 0, 0, 0}});
+    RenderSettings observerSettings;
+    observerSettings.integrationMode = RenderSettings::FullScene;
+    for (double radius : {0.25, 0.9, 0.9999, 1.0, 1.0001, 2.0, 8.0})
+    {
+        for (double speed : {0.0, 0.5, -0.5, 0.999})
+        {
+            observerSettings.observerVelocity = {speed, 0, 0};
+            auto observed = traceCpu(observerScene, observerSettings, {radius, 0, 0}, {1, 0, 0});
+            double gamma = 1 / std::sqrt(1 - speed * speed);
+            double energy = gamma * (1 - speed) * (1 + 1 / std::sqrt(radius));
+            double expected = std::pow(std::sqrt(0.95) / energy, 4);
+            require(
+                observed.status == 1 &&
+                    std::abs(observed.color.x - expected) < 1e-6 * std::max(1.0, expected),
+                "Rain observer radial redshift must match analytic frequency on both sides of the horizon");
+        }
+    }
+    observerSettings.observerVelocity = {0, 0, 0};
+    for (int i = 0; i <= 64; ++i)
+    {
+        double angle = i * 3.141592653589793 / 64;
+        double energy = 1 + std::cos(angle) / std::sqrt(0.8);
+        double angular = 0.8 * std::sin(angle);
+        double impactSquared = angular * angular / (energy * energy);
+        if (std::abs(impactSquared - 6.75) < 0.01)
+            continue;
+        int expectedStatus = energy > 0 && impactSquared < 6.75 ? 1 : 3;
+        auto cone =
+            traceCpu(observerScene, observerSettings, {0.8, 0, 0}, {std::cos(angle), std::sin(angle), 0});
+        require(cone.status == expectedStatus,
+                "Interior escape cone must match the analytic photon-sphere impact parameter");
+    }
+    require(traceCpu(observerScene, observerSettings, {0.5, 0, 0}, {-1, 0, 0}).status == 3,
+            "Negative Killing energy cannot connect to the exterior stationary environment");
+    observerSettings.redshift = false;
+    for (auto mode : {RenderSettings::FixedRadius, RenderSettings::FullScene, RenderSettings::AdaptiveCutoff})
+    {
+        observerSettings.integrationMode = mode;
+        require(distance(traceCpu(observerScene, observerSettings, {0.5, 0, 0}, {1, 0, 0}).color, {1, 1, 1}) <
+                    1e-8,
+                "Interior camera must bypass the exterior cutoff automatically");
+    }
+
     std::cout << "CPU tests passed: intersections, textures, materials, capture, translation, convergence, "
                  "bounded integration.\n";
     return 0;
@@ -218,6 +266,7 @@ int runGpuTests(const std::filesystem::path& assets)
     runCpuTests();
     GpuRenderer gpu(assets);
     RenderSettings settings;
+    settings.useObserverFrame = false;
     settings.integrationMode = RenderSettings::FullScene;
     std::cout << "Testing GPU: " << gpu.device() << std::endl;
     auto fit = gpu.fitResolution(16000, 9000);
@@ -501,6 +550,89 @@ int runGpuTests(const std::filesystem::path& assets)
     }
 
     require(missing, "Missing image must fail explicitly");
+
+    auto movingScene = fieldScene();
+    movingScene.textures[0].color = {1, 1, 1, 0};
+    movingScene.materials.push_back({{Environment, 0, 0, 0}, {1, 0, 0, 0}});
+    movingScene.spheres.push_back({{0, 0, 0, 20}, {1, 0, 0, 0}});
+    RenderSettings movingSettings;
+    movingSettings.integrationMode = RenderSettings::FullScene;
+    std::vector<std::array<Vec3, 2>> movingRays;
+    for (double radius : {0.25, 0.9, 0.9999, 1.0, 1.0001, 2.0})
+        for (Vec3 direction : {Vec3(1, 0, 0), Vec3(1, 0.2, 0.3), Vec3(-1, 0, 0)})
+            movingRays.push_back({Vec3(radius, 0, 0), direction});
+    for (Vec3 velocity : {Vec3(0), Vec3(0.2, -0.1, 0.3), Vec3(0.999, 0, 0)})
+    {
+        movingSettings.observerVelocity = velocity;
+        auto movingResults = gpu.traceRays(movingScene, movingSettings, movingRays);
+        for (std::size_t i = 0; i < movingRays.size(); ++i)
+        {
+            auto expected = traceCpu(movingScene, movingSettings, movingRays[i][0], movingRays[i][1]);
+            require(movingResults[i].status == expected.status && expected.status != 2 &&
+                        distance(movingResults[i].color, expected.color) <
+                            0.005 * std::max(1.0, distance(expected.color, Vec3(0))),
+                    "Boosted horizon-crossing GPU rays must agree with double precision");
+        }
+    }
+    movingSettings.observerVelocity = {0.1, 0.05, 0};
+    movingSettings.width = 256;
+    movingSettings.height = 160;
+    movingSettings.samples = 30;
+    movingSettings.exposure = 8;
+    CameraData insideCamera;
+    insideCamera.position = {0, 0.8, -1};
+    insideCamera.lookAt = {4, 0, -1};
+    insideCamera.verticalFov = 120;
+    gpu.uploadScene(scene);
+    gpu.reset(movingSettings, insideCamera);
+    waitFor(gpu);
+    auto interior = gpu.readback();
+    auto interiorCpu = renderCpu(scene, movingSettings, insideCamera);
+    double interiorError = imageRmse(interior, interiorCpu);
+    std::cout << "Interior observer CPU/GPU RMSE: " << interiorError << std::endl;
+    double energySum = 0, maximumError = 0;
+    std::size_t worstPixel = 0;
+    for (std::size_t i = 0; i < interior.size(); ++i)
+    {
+        auto expected = interiorCpu[i];
+        energySum += double(expected.x) * expected.x + double(expected.y) * expected.y +
+                     double(expected.z) * expected.z;
+        double error =
+            distance({interior[i].x, interior[i].y, interior[i].z}, {expected.x, expected.y, expected.z});
+        if (error > maximumError)
+        {
+            maximumError = error;
+            worstPixel = i;
+        }
+    }
+    std::cout << "Interior reference RMS: " << std::sqrt(energySum / (3 * interior.size()))
+              << "; max error: " << maximumError << "; pixel: " << worstPixel
+              << "; GPU/CPU red: " << interior[worstPixel].x << "/" << interiorCpu[worstPixel].x
+              << "; invalid: " << gpu.progress().failures << std::endl;
+    savePng(path, movingSettings.width, movingSettings.height, interior, movingSettings.exposure);
+    std::cout << "Interior validation image: " << path.string() << std::endl;
+    require(gpu.progress().failures == 0 && interiorError < 0.06,
+            "Interior image must remain finite and agree with CPU reference");
+    require(std::any_of(interior.begin(),
+                        interior.end(),
+                        [](Float4 pixel)
+                        {
+                            return pixel.x + pixel.y + pixel.z > 0.001f;
+                        }),
+            "Interior observer must see light from the exterior");
+    movingSettings.width = 32;
+    movingSettings.height = 24;
+    movingSettings.samples = 4;
+    movingSettings.observerVelocity = {0.2, -0.1, 0.3};
+    for (auto mode : {RenderSettings::FixedRadius, RenderSettings::FullScene, RenderSettings::AdaptiveCutoff})
+    {
+        movingSettings.integrationMode = mode;
+        gpu.reset(movingSettings, CameraData{});
+        waitFor(gpu);
+        require(gpu.progress().failures == 0 &&
+                    imageRmse(gpu.readback(), renderCpu(scene, movingSettings, CameraData{})) < 0.06,
+                "Exterior velocity rendering must agree with CPU in every integration mode");
+    }
     require(glGetError() == GL_NO_ERROR, "OpenGL error during validation");
     std::cout << "GPU tests passed: trajectories, materials/textures, deterministic rendering, "
                  "cancellation/resize, presentation, PNG, missing assets.\n";

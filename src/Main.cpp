@@ -412,7 +412,8 @@ int main(int argc, char** argv)
             }
 
             panel.beginFrame();
-            auto actions = panel.draw(slowMovementStep, renderer.progress(), activeSettings, preview);
+            auto actions =
+                panel.draw(slowMovementStep, renderer.progress(), activeSettings, preview, camera, scene);
             if (actions.save)
                 saveImage();
             if (actions.renderChanged)

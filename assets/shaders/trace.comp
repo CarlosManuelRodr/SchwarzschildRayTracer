@@ -83,6 +83,18 @@ uniform ivec2 dimensions;
 uniform int targetSamples, resetState, testMode;
 uniform int firstPassOnly;
 uniform int gravityMode;
+uniform vec3 observerBeta;
+uniform int useObserverFrame;
+
+vec3 observerVelocity()
+{
+    return observerBeta;
+}
+
+bool observerFrameEnabled()
+{
+    return useObserverFrame != 0;
+}
 
 int integrationMode()
 {
@@ -253,6 +265,8 @@ TraceState loadState(int i)
     s.h2 = a.integration.x;
     s.step = a.integration.y;
     s.observerLapse = a.integration.z;
+    s.energy = a.integration.w;
+    s.observerMode = int(a.random.y);
     s.field = a.meta.x;
     s.attempts = a.meta.y;
     s.depth = a.meta.z;
@@ -268,9 +282,9 @@ void storeState(int i, TraceState s)
     states[i].v = vec4(s.v, 0);
     states[i].throughput = vec4(s.throughput, 0);
     states[i].radiance = vec4(s.radiance, 0);
-    states[i].integration = vec4(s.h2, s.step, s.observerLapse, 0);
+    states[i].integration = vec4(s.h2, s.step, s.observerLapse, s.energy);
     states[i].meta = ivec4(s.field, s.attempts, s.depth, s.status);
-    states[i].random = uvec4(s.rng, 0, 0, 0);
+    states[i].random = uvec4(s.rng, uint(s.observerMode), 0, 0);
 }
 
 void main()

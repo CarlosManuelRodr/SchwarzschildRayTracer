@@ -69,7 +69,9 @@ void SettingsPanel::beginFrame()
 PanelActions SettingsPanel::draw(double& slowStep,
                                  const GpuProgress& progress,
                                  const RenderSettings& active,
-                                 bool preview)
+                                 bool preview,
+                                 const CameraData& camera,
+                                 const SceneData& scene)
 {
     PanelActions actions;
     if (!visible)
@@ -139,6 +141,60 @@ PanelActions SettingsPanel::draw(double& slowStep,
             }
             ImGui::TextWrapped("Drag the slider or Ctrl+click to type. Step value accepts exact values.");
             ImGui::Text("Shift movement: %.8g units/s", 20 * slowStep);
+        }
+
+        if (ImGui::CollapsingHeader("Observer velocity", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            double components[] = {
+                draft.observerVelocity.x, draft.observerVelocity.y, draft.observerVelocity.z};
+            const char* axes[] = {"X", "Y", "Z"};
+            bool changed = false;
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                ImGui::PushID(axis);
+                float magnitude = float(std::abs(components[axis]));
+                bool negative = std::signbit(components[axis]);
+                ImGui::Text("%s velocity", axes[axis]);
+                changed |=
+                    ImGui::SliderFloat("Speed / c", &magnitude, 0, 1, "%.5f", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SameLine();
+                changed |= ImGui::Checkbox("Negative", &negative);
+                components[axis] = negative ? -double(magnitude) : double(magnitude);
+                ImGui::PopID();
+            }
+            if (changed)
+            {
+                Vec3 velocity{components[0], components[1], components[2]};
+                double speed = std::sqrt(dot(velocity, velocity));
+                if (speed > 0.999)
+                    velocity = (0.999 / speed) * velocity;
+                draft.observerVelocity = velocity;
+                actions.renderChanged = true;
+            }
+            if (ImGui::Button("Reset velocity"))
+            {
+                draft.observerVelocity = Vec3(0);
+                actions.renderChanged = true;
+            }
+            ImGui::Text("Combined speed: %.5f c",
+                        std::sqrt(dot(draft.observerVelocity, draft.observerVelocity)));
+            ImGui::TextWrapped("World-aligned axes in the local freely falling frame. Zero means falling "
+                               "from rest at infinity. This changes the image, not camera position. Total "
+                               "speed is limited to 0.999c; a camera cannot travel at c.");
+            for (auto sphere : scene.spheres)
+            {
+                if (scene.materials[sphere.material.x].kindTexture.x != Schwarzschild)
+                    continue;
+                Vec3 offset = camera.position -
+                              Vec3(sphere.centerRadius.x, sphere.centerRadius.y, sphere.centerRadius.z);
+                double radius = std::sqrt(dot(offset, offset));
+                ImGui::Text("Observer radius: %.6f horizons", radius);
+                if (radius <= 1e-4)
+                    ImGui::TextWrapped("Singularity guard: no physical observer frame is defined here.");
+                else if (radius <= 1)
+                    ImGui::TextWrapped("Horizon/interior: automatic horizon-crossing integration. The "
+                                       "exterior cutoff setting is temporarily bypassed.");
+            }
         }
 
         if (ImGui::Button("Save PNG"))

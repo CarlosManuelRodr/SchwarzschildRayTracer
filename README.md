@@ -1,4 +1,25 @@
 # SchwarzschildRayTracer
+
+## Observer velocity and views inside the horizon
+
+The properties panel includes **Observer velocity** controls for X/Y/Z speed
+magnitudes and signs. They specify velocity relative to the world-aligned local
+freely falling frame, not navigation speed. Zero means a rain observer falling
+from rest at infinity. The combined speed is constrained to **0.999c** because a
+camera rest frame does not exist at exactly c. The camera stays where you place
+it; changing velocity modifies aberration and the measured color/brightness.
+
+At or inside the event horizon, the renderer automatically uses horizon-crossing
+backward rays and full integration to view exterior sources. Outside, the selected
+fixed-radius/full-scene/adaptive mode is retained. Full-scene mode gives the most
+consistent transition across the horizon. The former zero-velocity hovering view
+and the new zero-velocity freely falling view are intentionally different.
+
+See [Observer and horizon equations](docs/observer-and-horizon.md) for the English
+derivation, reference-frame conventions, frequency shifts, validation, and model
+limitations. Interior light sources and gravitational collapse history are not
+modeled; some past directions therefore remain dark. Exposure can help inspect
+faint incoming light.
 Ray tracer con desviación relativista de rayos de luz basado en la métrica de Schwarzschild.
 
 El renderizador actual usa **OpenGL 4.3 compute shaders** para trazar los rayos,

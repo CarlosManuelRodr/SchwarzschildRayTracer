@@ -27,7 +27,9 @@ class SettingsPanel
     PanelActions draw(double& slowStep,
                       const GpuProgress& progress,
                       const RenderSettings& active,
-                      bool preview);
+                      bool preview,
+                      const CameraData& camera,
+                      const SceneData& scene);
     void render();
     void syncResolution(int width, int height);
     void setStatus(const std::string& message, bool error = false);

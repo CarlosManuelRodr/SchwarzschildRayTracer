@@ -188,6 +188,16 @@ int integrationMode()
     return int(settings->integrationMode);
 }
 
+vec3 observerVelocity()
+{
+    return settings->observerVelocity;
+}
+
+bool observerFrameEnabled()
+{
+    return settings->useObserverFrame;
+}
+
 real relativeTolerance()
 {
     return settings->relativeTolerance;
@@ -299,6 +309,7 @@ void runCoreTests()
     require(std::abs(dot(angular, angular) - 2.25) < 1e-8);
     SceneData scene;
     RenderSettings settings;
+    settings.useObserverFrame = false;
     scene.texels = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {1, 1, 1, 0}};
     TextureData image;
     image.kindChildren.x = Image;
@@ -355,5 +366,26 @@ void runCoreTests()
     auto limbLight = reference::surfaceRadiance(source, {1, 0, 0}, 1);
     require(std::abs(limbLight.y / centerLight.y - (1.0 - double(0.6f))) < 1e-6);
     require(toneMap(100) >= toneMap(10) && toneMap(10) > toneMap(1));
+
+    // Independent null constraint and angular momentum checks for boosted
+    // horizon-crossing initial data; legacy tests above intentionally use the old frame.
+    scene.materials[0] = {{Schwarzschild, 0, 0, 0}, {}};
+    settings.useObserverFrame = true;
+    settings.observerVelocity = {0.2, -0.1, 0.3};
+    reference::TraceState observerRay;
+    reference::initTrace(observerRay, {0.7, 0, 0}, {1, 0.3, 0.2}, 1);
+    require(observerRay.status == 0 && observerRay.observerMode == 3);
+    auto momentum = cross(observerRay.p, observerRay.v);
+    double angularSquared = dot(momentum, momentum);
+    double energySquared = observerRay.energy * observerRay.energy;
+    for (int i = 0; i < 100; ++i)
+    {
+        double radius = reference::length(observerRay.p);
+        require(std::abs(dot(observerRay.v, observerRay.v) - angularSquared / (radius * radius * radius) -
+                         energySquared) < 1e-7);
+        require(reference::length(cross(observerRay.p, observerRay.v) - momentum) < 1e-8);
+        reference::rk4(
+            observerRay.p, observerRay.v, 0.005, {0, 0, 0}, angularSquared, observerRay.p, observerRay.v);
+    }
 }
 } // namespace rt

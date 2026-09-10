@@ -161,6 +161,8 @@ struct RenderSettings
     std::uint32_t seed = 1;
     bool redshift = true;
     float exposure = 1.0f;
+    Vec3 observerVelocity{0, 0, 0}; // Units of c in the world-aligned local rain tetrad.
+    bool useObserverFrame = true;   // False only for legacy numerical reference fixtures.
 
     float relativeTolerance = 1e-4f;
     float absoluteTolerance = 1e-6f;
