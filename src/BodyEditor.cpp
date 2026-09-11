@@ -136,7 +136,7 @@ void SettingsPanel::drawBodyEditor(PanelActions& actions,
         bodyEditPending = false;
     }
     auto display = ImGui::GetIO().DisplaySize;
-    ImGui::SetNextWindowPos(ImVec2(12, std::max(12.0f, display.y - 250 * uiScale)), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(12, std::max(12.0f, display.y - (6*ImGui::GetFrameHeightWithSpacing()+6*(ImGui::GetFrameHeight()+6)+52) - 250 * uiScale)), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(350 * uiScale, 225 * uiScale), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Body transform", &editorOpen))
     {

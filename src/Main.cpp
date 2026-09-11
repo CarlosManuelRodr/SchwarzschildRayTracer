@@ -3,6 +3,8 @@
 #include <SDL3/SDL_main.h>
 #include "SdlSupport.h"
 #include "SettingsPanel.h"
+#include "Timeline.h"
+#include <imgui.h>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -126,7 +128,8 @@ int main(int argc, char** argv)
         {
             std::string arg = argv[i];
 
-            if (arg == "--test-cpu" || arg == "--test-gpu" || arg == "--benchmark" || arg == "--render")
+            if (arg == "--test-cpu" || arg == "--test-gpu" || arg == "--benchmark" || arg == "--render" ||
+                arg == "--test-animation" || arg == "--test-export" || arg == "--test-export-gpu")
                 mode = arg;
             else if (arg == "--no-redshift")
                 settings.redshift = false;
@@ -190,6 +193,7 @@ int main(int argc, char** argv)
                 std::cout
                     << "SchwarzschildRayTracer [--width N --height N --samples N --seed N --assets DIR]\n"
                     << "  --test-cpu | --test-gpu | --benchmark | --render\n"
+                    << "  --test-animation | --test-export | --test-export-gpu\n"
                     << "  --exposure N | --no-redshift\n"
                     << "  --slow-step N (Shift movement per tap; default 0.0005; held speed 20*N units/s)\n"
                     << "  --full-scene-integration | --adaptative (default: fixed radius)\n"
@@ -211,7 +215,14 @@ int main(int argc, char** argv)
         if (mode == "--test-cpu")
             return rt::runCpuTests();
 
+        if (mode == "--test-animation") return rt::runAnimationTests();
+        if (mode == "--test-export") return rt::runExportTests(executableDirectory() / "Output");
         rt::SdlVideo video;
+        if (mode == "--test-export-gpu")
+        {
+            rt::SdlGlWindow context(1, 1, true);
+            return rt::runExportGpuTests(assets, executableDirectory() / "Output");
+        }
 
         if (mode == "--test-gpu")
         {
@@ -245,6 +256,7 @@ int main(int argc, char** argv)
         settings.height = initialSize[1];
         renderer.reset(settings, camera);
         rt::SettingsPanel panel(window.get(), settings);
+        rt::Timeline timeline(scene, camera);
         std::cout
             << "GPU: " << renderer.device()
             << "\nLeft-drag to look; arrows/WASD move; Q/E rise/descend; P saves; F1 toggles settings.\n";
@@ -285,13 +297,14 @@ int main(int argc, char** argv)
         while (running)
         {
             bool reset = false, tapped = false;
+            panel.setEditingEnabled(!timeline.busy());
             SDL_Event event;
 
             while (SDL_PollEvent(&event))
             {
                 panel.processEvent(event);
-                const bool captureMouse = panel.capturesMouse();
-                const bool captureKeyboard = panel.capturesKeyboard();
+                const bool captureMouse = panel.capturesMouse() || timeline.busy();
+                const bool captureKeyboard = panel.capturesKeyboard() || timeline.busy();
                 if (captureMouse)
                     dragging = false;
                 if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED ||
@@ -410,7 +423,7 @@ int main(int argc, char** argv)
                     minimized = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MINIMIZED) != 0 ||
                                 event.window.data1 <= 0 || event.window.data2 <= 0;
 
-                    if (!minimized && matchWindow)
+                    if (!minimized && matchWindow && !timeline.busy())
                     {
                         auto size = renderer.fitResolution(int(event.window.data1), int(event.window.data2));
                         settings.width = size[0];
@@ -431,7 +444,7 @@ int main(int argc, char** argv)
             double dt = std::min(0.05, std::chrono::duration<double>(now - last).count());
             last = now;
 
-            if (minimized)
+            if (minimized && !timeline.busy())
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
@@ -440,6 +453,7 @@ int main(int argc, char** argv)
             panel.beginFrame();
             auto actions =
                 panel.draw(slowMovementStep, renderer.progress(), activeSettings, preview, camera, scene);
+            timeline.draw(panel, settings);
             if (actions.body >= 0 && actions.body < int(scene.spheres.size()))
             {
                 auto& center = scene.spheres[actions.body].centerRadius;
@@ -495,7 +509,7 @@ int main(int argc, char** argv)
                 }
             }
 
-            if (focused && !tapped && !panel.capturesKeyboard())
+            if (focused && !tapped && !panel.capturesKeyboard() && !timeline.busy())
             {
                 auto key = [](SDL_Keycode k)
                 {
@@ -514,54 +528,80 @@ int main(int argc, char** argv)
                 }
             }
 
+            renderer.poll();
+            bool wasBusy = timeline.busy();
+            bool animated = timeline.update(scene, camera, renderer, settings, activeSettings,
+                                            dragging || panel.manipulatingBody() || ImGui::IsAnyItemActive() || reset);
+            if (animated)
+            {
+                geometryDirty = true;
+                reset = true;
+            }
+            if (timeline.busy())
+            {
+                cameraPending = false;
+                renderSettingsPending = false;
+                geometryDirty = false;
+                preview = timeline.mode() == rt::AnimationMode::Playback;
+            }
+            else if (wasBusy)
+            {
+                // Force a full-quality restore, even if the last preview was interrupted.
+                preview = false;
+                cameraPending = true;
+            }
             if (reset)
             {
                 cameraPending = true;
                 lastMovement = now;
             }
 
-            renderer.poll();
-            if (renderSettingsPending && seconds(lastSettingsEdit) >= 0.15)
+            if (!timeline.busy())
             {
-                settings = pendingSettings;
-                matchWindow = pendingMatchWindow;
-                preview = false;
-                activeSettings = settings;
-                if (geometryDirty)
+                if (renderSettingsPending && seconds(lastSettingsEdit) >= 0.15)
                 {
-                    renderer.updateGeometry(scene);
-                    geometryDirty = false;
-                }
-                renderer.reset(activeSettings, camera);
-                cameraPending = false;
-                renderSettingsPending = false;
-                panel.setStatus("Rendering updated settings.");
-            }
-
-            // Finish each preview even if newer input arrives. Otherwise a held
-            // key would continually cancel the slow rays and no preview would finish.
-            bool settled = std::chrono::duration<double>(now - lastMovement).count() >= 0.15;
-            bool canReplace = !preview || renderer.progress().finished;
-            if (canReplace && (cameraPending || (preview && settled)))
-            {
-                preview = !settled;
-                activeSettings = settings;
-                if (preview)
-                {
-                    activeSettings.width = std::max(1, settings.width / 4);
-                    activeSettings.height = std::max(1, settings.height / 4);
-                    activeSettings.samples = 1;
+                    settings = pendingSettings;
+                    matchWindow = pendingMatchWindow;
+                    preview = false;
+                    activeSettings = settings;
+                    if (geometryDirty)
+                    {
+                        renderer.updateGeometry(scene);
+                        geometryDirty = false;
+                    }
+                    renderer.reset(activeSettings, camera);
+                    cameraPending = false;
+                    renderSettingsPending = false;
+                    panel.setStatus("Rendering updated settings.");
                 }
 
-                if (geometryDirty)
+                // Finish each preview even if newer input arrives. Otherwise a held
+                // key would continually cancel the slow rays and no preview would finish.
+                bool settled = std::chrono::duration<double>(now - lastMovement).count() >= 0.15;
+                bool canReplace = !preview || renderer.progress().finished;
+                if (canReplace && (cameraPending || (preview && settled)))
                 {
-                    renderer.updateGeometry(scene);
-                    geometryDirty = false;
-                }
-                renderer.reset(activeSettings, camera);
-                cameraPending = false;
-            }
+                    preview = !settled;
+                    activeSettings = settings;
+                    if (preview)
+                    {
+                        activeSettings.width = std::max(1, settings.width / 4);
+                        activeSettings.height = std::max(1, settings.height / 4);
+                        activeSettings.samples = 1;
+                    }
 
+                    if (geometryDirty)
+                    {
+                        renderer.updateGeometry(scene);
+                        geometryDirty = false;
+                    }
+                    renderer.reset(activeSettings, camera);
+                    cameraPending = false;
+                }
+
+            } // Ordinary progressive rendering is suspended during playback/export.
+
+            if (!minimized)
             {
                 int width = 0, height = 0;
                 rt::checkSdl(SDL_GetWindowSizeInPixels(window.get(), &width, &height), "Get drawable size");
@@ -569,6 +609,9 @@ int main(int argc, char** argv)
                 panel.render();
                 rt::checkSdl(SDL_GL_SwapWindow(window.get()), "Swap window");
             }
+
+            else
+                ImGui::EndFrame();
 
             renderer.dispatch();
 

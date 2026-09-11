@@ -1,5 +1,66 @@
 # SchwarzschildRayTracer
 
+## Animation timeline and video export
+
+The **Timeline** window animates body positions and the camera pose independently.
+Animation projects currently live only in memory: closing the app loses the timeline.
+
+1. Select a body in the view or its timeline row (or select **Camera**).
+2. Choose a frame using the ruler, frame field, or navigation buttons.
+3. Move the object with its existing gizmo/XYZ fields, or navigate the camera.
+4. Press **Add Keyframe**. At an existing key, **Update Keyframe** replaces that pose.
+5. Repeat at another frame. Drag a diamond to retime it, or select it and press
+   **Remove Keyframe** / Delete. Keys cannot overlap within a track.
+
+Position interpolation is linear; camera orientation follows the shortest rotation.
+Outside a track's keys, the nearest key is held. A track with no keys stays at its
+base pose. The first key does not create an implicit key at frame zero.
+Edits to animated tracks show **Unkeyed changes** until captured. Seeking, playing,
+or exporting discards these edits; Undo can recover them. Unanimated tracks remain
+editable as static objects. The history retains 100 commands, grouping each drag
+or navigation gesture. Ctrl+Z/Ctrl+Y undo/redo when not editing text; Space toggles
+playback when the timeline has focus. F1 hides/shows panels and gizmos.
+
+The default is 300 frames at 30 FPS (frames 0–299, ten seconds). **Apply timing**
+changes the frame count/FPS; FPS changes preserve key frame numbers. Move/remove
+outlying keys before reducing the frame count. Resize the Timeline window, use
+Zoom, and scroll horizontally to navigate longer clips.
+
+**Play** renders every frame at quarter resolution and one sample. Expensive frames
+slow playback rather than being skipped. Pausing refines the current frame.
+
+**Export...** offers numbered PNG frames or H.264 MP4, with destination, resolution,
+sample count, and bitrate (default 20 Mbps). It uses committed render settings,
+the same seed for each frame, and all timeline frames. MP4 dimensions must be even.
+Choose a new destination; existing files/directories are never silently replaced.
+Relative destinations resolve against the application's working directory.
+
+- Windows MP4 uses the system Media Foundation encoder; no FFmpeg installation is
+  needed. If media features/encoding are unavailable, the app reports the error
+  before rendering and PNG export is still available.
+- Linux MP4 uses `ffmpeg` from `PATH` with `libx264` and the `color` source filter.
+  The backend performs an encoder/configuration preflight before scene rendering.
+  Native Linux validation is deferred to a future Linux session.
+- PNG exports use `frame-000000.png` onward in a new directory. Completed PNGs
+  remain after cancellation. MP4 exports publish only after finalization and
+  remove incomplete temporary output when cancelled.
+
+The UI remains responsive during export, including Cancel, and exporting continues
+while minimized. Scene editing is locked until completion/cancellation, after which
+the pre-export playhead pose and interactive rendering settings are restored.
+Images use the same color processing as Save PNG and contain no ImGui overlays.
+
+The portable `FrameSink` interface consumes top-down RGBA8 frames with frame indices
+and rational timestamps. It supports asynchronous startup, bounded submission,
+progress, finalization, and cancellation. `FrameExport` owns frame ordering and
+backpressure without platform APIs; desktop file/process/COM details stay in
+`DesktopFrameSink`. A future WebCodecs sink can implement this same contract.
+
+Validation commands: `--test-animation`, `--test-export`, and `--test-export-gpu`.
+The export test checks Media Foundation encoding/decoding only on Windows. CTest
+also includes the existing CPU/GPU reference suites. Test outputs are placed in
+unique directories under the executable's `Output` folder.
+
 ## Texture credits
 
 The realistic Earth textures (day, night, clouds, normal and specular maps) and

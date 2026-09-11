@@ -211,4 +211,8 @@ void savePng(const std::filesystem::path& path,
              int height,
              const std::vector<Float4>& linear,
              float exposure = 1.0f);
+std::vector<unsigned char> displayRgba(const std::vector<Float4>& linear, int width, int height,
+                                       float exposure = 1.0f);
+void saveRgbaPng(const std::filesystem::path& path, int width, int height,
+                 const std::vector<unsigned char>& rgba);
 } // namespace rt

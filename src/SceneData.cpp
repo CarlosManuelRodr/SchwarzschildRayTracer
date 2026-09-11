@@ -315,7 +315,13 @@ void savePng(const std::filesystem::path& path,
 {
     if (width <= 0 || height <= 0 || linear.size() != std::size_t(width) * height)
         throw std::runtime_error("Wrong image size for PNG export");
-    std::vector<Uint8> rgba(linear.size() * 4);
+    saveRgbaPng(path, width, height, displayRgba(linear, width, height, exposure));
+}
+std::vector<unsigned char> displayRgba(const std::vector<Float4>& linear, int width, int height, float exposure)
+{
+    if (width <= 0 || height <= 0 || linear.size() != std::size_t(width) * height)
+        throw std::runtime_error("Wrong image size for display conversion");
+    std::vector<unsigned char> rgba(linear.size() * 4);
 
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x)
@@ -328,9 +334,15 @@ void savePng(const std::filesystem::path& path,
             rgba[i + 3] = 255;
         }
 
+    return rgba;
+}
+void saveRgbaPng(const std::filesystem::path& path, int width, int height, const std::vector<unsigned char>& rgba)
+{
+    if (width <= 0 || height <= 0 || rgba.size() != std::size_t(width) * height * 4)
+        throw std::runtime_error("Wrong RGBA image size");
     if (!path.parent_path().empty())
         std::filesystem::create_directories(path.parent_path());
-    SdlSurface image(SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGBA32, rgba.data(), width * 4),
+    SdlSurface image(SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGBA32, const_cast<unsigned char*>(rgba.data()), width * 4),
                      SDL_DestroySurface);
     checkSdl(bool(image), "Create PNG surface");
     if (!SDL_SavePNG(image.get(), path.u8string().c_str()))

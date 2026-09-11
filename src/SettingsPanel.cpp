@@ -41,7 +41,7 @@ SettingsPanel::~SettingsPanel()
 void SettingsPanel::processEvent(const SDL_Event& event)
 {
     ImGui_ImplSDL3_ProcessEvent(&event);
-    processGizmoEvent(event);
+    if (editingEnabled) processGizmoEvent(event);
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_F1)
     {
         visible = !visible;
@@ -90,6 +90,7 @@ PanelActions SettingsPanel::draw(double& slowStep,
                              ImGuiCond_FirstUseEver);
     // ImGui 1.92.9 defaults numeric fields to commit on Enter/focus loss.
     ImGui::PushItemFlag(ImGuiItemFlags_LiveEditOnInputScalar, true);
+    ImGui::BeginDisabled(!editingEnabled);
     if (ImGui::Begin("Render settings", &visible))
     {
         ImGui::TextDisabled("F1: hide / show settings");
@@ -257,6 +258,7 @@ PanelActions SettingsPanel::draw(double& slowStep,
     }
     ImGui::End();
     drawBodyEditor(actions, camera, scene, double(active.width) / active.height);
+    ImGui::EndDisabled();
     ImGui::PopItemFlag();
     return actions;
 }

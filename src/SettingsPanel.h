@@ -37,6 +37,9 @@ class SettingsPanel
                       const SceneData& scene);
     void render();
     void selectBody(int body);
+    int selectedBodyIndex() const { return selectedBody; }
+    bool isVisible() const { return visible; }
+    void setEditingEnabled(bool enabled) { editingEnabled=enabled; if (!enabled) { dragAxis=-1; bodyEditPending=false; } }
 
     bool manipulatingBody() const
     {
@@ -75,5 +78,6 @@ class SettingsPanel
     bool matchWindow = true;
     std::string status;
     bool statusError = false;
+    bool editingEnabled = true;
 };
 } // namespace rt
