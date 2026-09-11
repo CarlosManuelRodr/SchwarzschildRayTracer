@@ -237,6 +237,12 @@ int main(int argc, char** argv)
         // Renderer is destroyed before window, while its GL context is still valid.
         rt::GpuRenderer renderer(assets);
         renderer.uploadScene(scene);
+        int drawableWidth = 0, drawableHeight = 0;
+        rt::checkSdl(SDL_GetWindowSizeInPixels(window.get(), &drawableWidth, &drawableHeight),
+                     "Get initial maximized size");
+        auto initialSize = renderer.fitResolution(drawableWidth, drawableHeight);
+        settings.width = initialSize[0];
+        settings.height = initialSize[1];
         renderer.reset(settings, camera);
         rt::SettingsPanel panel(window.get(), settings);
         std::cout

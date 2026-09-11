@@ -129,10 +129,14 @@ void SceneData::validate() const
 
     for (auto m : materials)
     {
-        if (m.kindTexture.x < 0 || m.kindTexture.x > Environment || m.kindTexture.y < 0 ||
+        if (m.kindTexture.x < 0 || m.kindTexture.x > Moon || m.kindTexture.y < 0 ||
             m.kindTexture.y >= int(textures.size()) || !finite(m.parameters) ||
             (m.kindTexture.x == Dielectric && m.parameters.x <= 0))
             throw std::runtime_error("Invalid material");
+
+        for (int layer : {m.layers.x, m.layers.y, m.layers.z, m.layers.w})
+            if (layer < -1 || layer >= int(textures.size()))
+                throw std::runtime_error("Invalid material texture layer");
 
         if (m.kindTexture.x == DiffuseLight &&
             (m.parameters.y < 0 || m.parameters.y > 50000 || m.parameters.z < 0 || m.parameters.w < 0 ||
@@ -162,8 +166,9 @@ void SceneData::validate() const
             throw std::runtime_error("Invalid texture");
 
         if (t.kindChildren.x == Image &&
-            (t.image.x < 0 || t.image.y <= 0 || t.image.z <= 0 ||
-             std::uint64_t(t.image.x) + std::uint64_t(t.image.y) * t.image.z > texels.size()))
+            (t.image.x < 0 || t.image.y <= 0 || t.image.z <= 0 || t.image.w < 0 || t.image.w > 2 ||
+             std::uint64_t(t.image.x) + std::uint64_t(t.image.y) * t.image.z >
+                 (t.image.w == 0 ? texels.size() : imageTexels.size())))
             throw std::runtime_error("Invalid image storage");
 
         if (t.kindChildren.x == Checker)
@@ -211,7 +216,7 @@ RenderSettings observerSettings(const SceneData& scene,
 SceneData defaultScene(const std::filesystem::path& assets)
 {
     SceneData s;
-    auto image = [&](const char* name)
+    auto image = [&](const char* name, bool linear = false)
     {
         auto path = assets / "textures" / name;
         // Read with filesystem::path to support Unicode asset paths on Windows.
@@ -231,28 +236,37 @@ SceneData defaultScene(const std::filesystem::path& assets)
             throw std::runtime_error("Cannot decode texture: " + path.string());
         TextureData t;
         t.kindChildren.x = Image;
-        t.image = {int(s.texels.size()), width, height, 0};
+        t.image = {int(s.imageTexels.size()), width, height, linear ? 2 : 1};
         for (std::size_t i = 0; i < std::size_t(width) * height; ++i)
-            s.texels.push_back({decodeSrgb(pixels.get()[4 * i] / 255.f),
-                                decodeSrgb(pixels.get()[4 * i + 1] / 255.f),
-                                decodeSrgb(pixels.get()[4 * i + 2] / 255.f),
-                                0});
+            s.imageTexels.push_back(std::uint32_t(pixels.get()[4 * i]) |
+                                    (std::uint32_t(pixels.get()[4 * i + 1]) << 8) |
+                                    (std::uint32_t(pixels.get()[4 * i + 2]) << 16));
         s.textures.push_back(t);
 
         return int(s.textures.size() - 1);
     };
-    int earth = image("earthmap.jpg"), sky = image("starbackground.jpg");
-    TextureData light;
-    light.color = {2, 2, 2, 0};
-    s.textures.push_back(light);
-    s.materials = {{{Earth, earth, 0, 0}, {0.12f, 0, 0, 0}},
-                   {{DiffuseLight, 2, 0, 0}, {0, 5778, 24, 0.6f}},
-                   {{Schwarzschild, 2, 0, 0}, {}},
-                   {{Environment, sky, 0, 0}, {0.2f, 0, 0, 0}}};
-    s.spheres = {{{7, 0, -1, 1}, {0, 0, 0, 0}},
-                 {{8, 4, 1, 0.65f}, {1, 0, 0, 0}},
-                 {{0, 0, -1, 5.5f}, {2, 0, 0, 0}},
-                 {{0, 0, 0, 200}, {3, 0, 0, 0}}};
+    // Reserve once: preserve all supplied detail without a multi-gigabyte float copy.
+    s.imageTexels.reserve(220000000);
+    int earth = image("8k_earth_daymap.jpg");
+    int night = image("8k_earth_nightmap.jpg");
+    int clouds = image("8k_earth_clouds.jpg", true);
+    int normal = image("8k_earth_normal_map.png", true);
+    int specular = image("8k_earth_specular_map.png", true);
+    int sun = image("8k_sun.jpg");
+    int moon = image("8k_moon.jpg");
+    int sky = image("starbackground.jpg");
+    s.materials = {{{Earth, earth, 0, 0}, {0.12f, 0, 0, 0}, {night, clouds, normal, specular}},
+                   {{DiffuseLight, sun, 0, 0}, {0, 5778, 24, 0.6f}},
+                   {{Schwarzschild, sun, 0, 0}, {}},
+                   {{Environment, sky, 0, 0}, {0.2f, 0, 0, 0}},
+                   {{Moon, moon, 0, 0}, {}}};
+    // Translate the previous scene by +1 on Z, including the sky and default camera.
+    // The Moon's radius is physical; its separation is compressed for illustration.
+    s.spheres = {{{7, 0, 0, 1}, {0, 0, 0, 0}},
+                 {{8, 4, 2, 0.65f}, {1, 0, 0, 0}},
+                 {{0, 0, 0, 5.5f}, {2, 0, 0, 0}},
+                 {{0, 0, 1, 200}, {3, 0, 0, 0}},
+                 {{9.4f, 0.6f, 0, 0.2727f}, {4, 0, 0, 0}}};
     s.disk.enabled = true;
     s.validate();
 

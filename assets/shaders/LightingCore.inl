@@ -141,7 +141,13 @@ vec3 surfaceRadiance(SurfaceHit hit, vec3 photonDirection, real observerLapse)
 
     real cosine = max(real(0), dot(hit.normal, staticDirection(hit.p, photonDirection)));
     real limb = (real(1) - emission.z * (real(1) - cosine)) / (real(1) - emission.z / real(3));
-    return emission.y * limb * blackbody(emission.x * shift);
+    vec3 texture = textureValue(materialTexture(material), hit.u, hit.v, hit.p);
+    // The supplied solar image is orange false color, not an emission spectrum.
+    // Preserve its surface structure without tinting the entire planetary scene.
+    real structure = dot(texture, vec3(real(0.2126), real(0.7152), real(0.0722)));
+    if (textureKind(materialTexture(material)) == 2)
+        structure /= real(0.4);
+    return emission.y * limb * structure * blackbody(emission.x * shift);
 }
 
 vec3 tangentAt(vec3 normal)
@@ -167,7 +173,7 @@ bool visibleLight(vec3 origin, vec3 direction, real distance, int light)
     return !diskHit(origin, direction, EPS, distance - EPS, t);
 }
 
-vec3 earthBrdf(vec3 albedo, vec3 normal, vec3 view, vec3 light)
+vec3 earthBrdf(vec3 albedo, vec3 normal, vec3 view, vec3 light, real ocean)
 {
     real nv = max(dot(normal, view), real(0));
     real nl = max(dot(normal, light), real(0));
@@ -175,8 +181,8 @@ vec3 earthBrdf(vec3 albedo, vec3 normal, vec3 view, vec3 light)
     if (nv <= real(0) || nl <= real(0))
         return vec3(0);
 
-    // The supplied color map has no ocean mask; classify blue-dominant texels.
-    real ocean = albedo.z > real(1.15) * albedo.x && albedo.z > real(0.95) * albedo.y ? real(1) : real(0);
+    if (ocean < real(0))
+        return albedo / PI; // Rough lunar regolith.
     real roughness = ocean > real(0) ? real(0.12) : real(0.65);
     real f0 = ocean > real(0) ? real(0.02) : real(0.04);
     vec3 halfVector = safeUnit(view + light);
@@ -200,6 +206,47 @@ vec3 illuminateEarth(INOUT(TraceState) state, SurfaceHit hit, vec3 albedo)
     vec3 result = vec3(0);
     vec3 view = -staticDirection(hit.p, state.v);
     vec3 origin = hit.p + EPS * hit.normal;
+    int material = sphereMaterial(hit.sphere);
+    bool earth = materialKind(material) == 5;
+    vec3 normal = hit.normal;
+    real cloud = real(0);
+    real ocean =
+        earth && albedo.z > real(1.15) * albedo.x && albedo.z > real(0.95) * albedo.y ? real(1) : real(0);
+    int layer = materialLayer(material, 1);
+    if (earth && layer >= 0)
+        cloud = clamp(textureValue(layer, hit.u, hit.v, hit.p).x, real(0), real(1));
+    layer = materialLayer(material, 3);
+    if (earth && layer >= 0)
+        ocean = textureValue(layer, hit.u, hit.v, hit.p).x;
+    ocean *= real(1) - cloud;
+    if (!earth)
+        ocean = real(-1);
+    albedo = (real(1) - cloud) * albedo + cloud * vec3(real(0.8));
+    layer = materialLayer(material, 2);
+    if (earth && layer >= 0)
+    {
+        vec3 mapped = real(2) * textureValue(layer, hit.u, hit.v, hit.p) - vec3(1);
+        vec3 tangent = safeUnit(vec3(normal.z, 0, -normal.x));
+        if (dot(tangent, tangent) < real(0.5))
+            tangent = vec3(0, 0, -1);
+        vec3 bitangent = cross(normal, tangent);
+        vec3 perturbed = safeUnit(mapped.x * tangent + mapped.y * bitangent + mapped.z * normal);
+        normal = safeUnit((real(1) - cloud) * perturbed + cloud * normal);
+    }
+
+    // Solar elevation controls city lights, with a smooth twilight transition.
+    real solarCosine = real(-1);
+    for (int i = 0; i < sphereCount(); ++i)
+        if (materialKind(sphereMaterial(i)) == 3)
+            solarCosine = max(solarCosine, dot(hit.normal, safeUnit(sphereCenter(i) - hit.p)));
+    real night = clamp(-solarCosine / real(0.12), real(0), real(1));
+    night = night * night * (real(3) - real(2) * night);
+    layer = materialLayer(material, 0);
+    if (earth && layer >= 0)
+        result += real(0.6) * night * (real(1) - real(0.85) * cloud) *
+                  textureValue(layer, hit.u, hit.v, hit.p) *
+                  pow(lapseAt(hit.p) / state.observerLapse, real(4));
+
 
     // Sample the solid angle of each spherical source: finite area, soft shadows,
     // and geometric falloff without relying on accidental BSDF/light hits.
@@ -233,8 +280,9 @@ vec3 illuminateEarth(INOUT(TraceState) state, SurfaceHit hit, vec3 albedo)
             SurfaceHit source = makeHit(i, origin, light, t);
             real solidAngle = real(2) * PI * (real(1) - cosineMaximum);
             result += surfaceRadiance(source, -light, state.observerLapse) *
-                      atmosphereTransmission(origin, light, t) * earthBrdf(albedo, hit.normal, view, light) *
-                      (dot(hit.normal, light) * solidAngle / real(4));
+                      atmosphereTransmission(origin, light, t) *
+                      earthBrdf(albedo, normal, view, light, ocean) *
+                      (max(dot(normal, light), real(0)) * solidAngle / real(4));
         }
     }
 
@@ -253,7 +301,7 @@ vec3 illuminateEarth(INOUT(TraceState) state, SurfaceHit hit, vec3 albedo)
             vec3 offset = point - origin;
             real distance = length(offset);
             vec3 light = offset / distance;
-            real cosine = max(dot(hit.normal, light), real(0));
+            real cosine = max(dot(normal, light), real(0));
 
             if (cosine <= real(0) || !visibleLight(origin, light, distance, -1))
                 continue;
@@ -261,7 +309,7 @@ vec3 illuminateEarth(INOUT(TraceState) state, SurfaceHit hit, vec3 albedo)
             real geometry = abs(dot(diskNormal(), light)) * cosine / (distance * distance);
             result += diskRadiance(point, -light, state.observerLapse) *
                       atmosphereTransmission(origin, light, distance) *
-                      earthBrdf(albedo, hit.normal, view, light) * (area * geometry / real(4));
+                      earthBrdf(albedo, normal, view, light, ocean) * (area * geometry / real(4));
         }
     }
 
@@ -309,10 +357,50 @@ vec3 atmosphereTransmission(vec3 origin, vec3 direction, real maximum)
     return attenuationFor(opticalDepth);
 }
 
+// An optically thin, illustrative solar corona. Integrating over the actual ray
+// segment keeps occultation and gravitational lensing consistent with geometry.
+void transferCorona(INOUT(TraceState) state, vec3 direction, real maximum)
+{
+    for (int i = 0; i < sphereCount(); ++i)
+    {
+        if (materialKind(sphereMaterial(i)) != 3 || materialEmission(sphereMaterial(i)).x <= real(0))
+            continue;
+        real radius = sphereRadius(i);
+        real outer = real(4) * radius;
+        vec3 relative = state.p - sphereCenter(i);
+        real b = dot(relative, direction);
+        real disc = b * b - dot(relative, relative) + outer * outer;
+        if (disc <= real(0))
+            continue;
+        real start = max(real(0), -b - sqrt(disc));
+        real end = min(maximum, -b + sqrt(disc));
+        if (end <= start)
+            continue;
+        real step = (end - start) / real(16);
+        vec3 glow = vec3(0);
+        for (int j = 0; j < 16; ++j)
+        {
+            vec3 point = state.p + (start + (real(j) + real(0.5)) * step) * direction;
+            vec3 offset = point - sphereCenter(i);
+            real ratio = length(offset) / radius;
+            if (ratio < real(1))
+                continue;
+            real fade = clamp((real(4) - ratio) / real(2), real(0), real(1));
+            real angle = atan(offset.z, offset.x);
+            real streamers = real(0.75) + real(0.25) * pow(abs(cos(real(7) * angle)), real(8));
+            real shift = lapseAt(point) / state.observerLapse;
+            glow += (step / radius) * real(0.5) * pow(ratio, real(-6)) * fade * fade * streamers *
+                    blackbody(real(6500) * shift);
+        }
+        state.radiance += state.throughput * glow;
+    }
+}
+
 // Single-scattering Rayleigh shell. View and solar optical depths use the same
 // exponential density profile; the planet itself blocks the night-side source.
 void transferAtmosphere(INOUT(TraceState) state, vec3 direction, real maximum)
 {
+    transferCorona(state, direction, maximum);
     int earth = planet();
     if (earth < 0 || maximum <= real(0))
         return;

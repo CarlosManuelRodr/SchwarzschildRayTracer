@@ -1,5 +1,33 @@
 # SchwarzschildRayTracer
 
+## Updated scene assets
+
+The black hole is at `(0, 0, 0)`. Earth remains 7 scene units from it; the Sun's
+position is `(8, 4, 2)`, preserving its previous distance and relative placement.
+The camera and background were translated by the same offset. Interactive windows
+start maximized; hidden validation/render windows remain unchanged.
+
+Earth uses the supplied day, night, cloud, normal and specular maps. Solar elevation
+smoothly enables city emission across the night-side terminator. Clouds blend over
+the surface and attenuate city lights; they are a surface coverage approximation,
+not a separate weather simulation. Normal and specular maps are linear data;
+color textures decode from sRGB before bilinear filtering, with wrapped longitude.
+The TIFF data maps have lossless PNG runtime copies with identical RGB pixels.
+All supplied image resolutions are retained (the Sun file is 4096 x 2048).
+
+The Moon is 0.2727 Earth radii, matching the [physical size ratio](https://science.nasa.gov/moon/by-the-numbers/).
+Its separation is deliberately compressed for the illustrative composition;
+Earth and Moon both receive direct sunlight, disk illumination and cast shadows.
+The Sun map's luminance modulates thermal emission with limb darkening; its orange
+false color does not tint the illumination. Lower Exposure to inspect the solar
+surface; at normal scene exposure the photosphere saturates white. An optically
+thin emissive halo follows the ray segments, so it can be occluded and lensed.
+Its brightness and streamers are artistic corona approximations, not a plasma model.
+
+High-resolution images use packed RGB bytes in GPU storage instead of four floats
+per pixel. The full texture set needs roughly 0.8 GiB, plus ray state and framebuffers;
+a GPU with a smaller per-buffer storage limit reports an explicit error.
+
 ## Observer velocity and views inside the horizon
 
 The Physical state panel offers **Hovering** (default) and **Freely falling** observers.

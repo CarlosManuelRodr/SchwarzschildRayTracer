@@ -108,7 +108,7 @@ struct StoredState
     std::array<std::uint32_t, 4> random;
 };
 
-static_assert(sizeof(StoredState) == 112 && sizeof(SphereData) == 32 && sizeof(MaterialData) == 32 &&
+static_assert(sizeof(StoredState) == 112 && sizeof(SphereData) == 32 && sizeof(MaterialData) == 48 &&
                   sizeof(TextureData) == 48,
               "GPU storage layout mismatch");
 } // namespace
@@ -121,7 +121,7 @@ struct GpuRenderer::Impl
     GLuint texture = 0;
     GLuint displayedTexture = 0;
     RenderSettings displayedSettings;
-    GLuint buffers[7]{};
+    GLuint buffers[8]{};
     GLuint query = 0;
 
     GLsync fence = nullptr;
@@ -147,7 +147,7 @@ struct GpuRenderer::Impl
         }
 
         glDeleteQueries(1, &query);
-        glDeleteBuffers(7, buffers);
+        glDeleteBuffers(8, buffers);
         glDeleteTextures(1, &texture);
         glDeleteTextures(1, &displayedTexture);
         glDeleteVertexArrays(1, &vao);
@@ -173,7 +173,8 @@ struct GpuRenderer::Impl
     {
         if (bytes > std::size_t(maxStorage))
             throw std::runtime_error(
-                "Scene or image exceeds GPU shader-storage block limit; reduce resolution");
+                "GPU shader-storage block limit exceeded. For ray state, reduce resolution; "
+                "for scene textures, use smaller texture assets.");
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, buffers[binding]);
         glBufferData(
             GL_SHADER_STORAGE_BUFFER, GLsizeiptr(std::max<std::size_t>(bytes, 16)), data, GL_DYNAMIC_DRAW);
@@ -222,7 +223,7 @@ GpuRenderer::GpuRenderer(const std::filesystem::path& assets) : impl(new Impl)
     g.trace = program({{GL_COMPUTE_SHADER, source}});
     g.display = program({{GL_VERTEX_SHADER, readText(assets / "shaders" / "fullscreen.vert")},
                          {GL_FRAGMENT_SHADER, readText(assets / "shaders" / "display.frag")}});
-    glGenBuffers(7, g.buffers);
+    glGenBuffers(8, g.buffers);
     glGenVertexArrays(1, &g.vao);
     glGenQueries(1, &g.query);
     g.buffer(6, nullptr, 32);
@@ -262,6 +263,8 @@ void GpuRenderer::uploadScene(const SceneData& scene)
     const auto& thermal = blackbodyTable();
     texels.insert(texels.end(), thermal.begin(), thermal.end());
     g.buffer(3, texels.data(), texels.size() * sizeof(Float4));
+
+    g.buffer(7, scene.imageTexels.data(), scene.imageTexels.size() * sizeof(std::uint32_t));
 
     glUseProgram(g.trace);
     int hole = -1;

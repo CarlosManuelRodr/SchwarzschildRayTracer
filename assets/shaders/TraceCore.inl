@@ -263,7 +263,7 @@ void scatterSurface(INOUT(TraceState) s, SurfaceHit hit)
         return;
     }
 
-    if (kind == 5)
+    if (kind == 5 || kind == 7)
     {
         s.radiance += s.throughput * illuminateEarth(s, hit, color);
         s.status = 1;

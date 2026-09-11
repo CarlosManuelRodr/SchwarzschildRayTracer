@@ -93,7 +93,8 @@ enum MaterialKind
     DiffuseLight,
     Schwarzschild,
     Earth,
-    Environment
+    Environment,
+    Moon
 };
 
 enum TextureKind
@@ -114,6 +115,7 @@ struct MaterialData
     Int4 kindTexture;
     // x: fuzz / IOR / environment intensity; thermal light y/z/w: kelvin, scale, limb.
     Float4 parameters;
+    Int4 layers{-1, -1, -1, -1}; // Night, clouds, tangent-space normal, specular mask.
 };
 
 struct TextureData
@@ -138,7 +140,8 @@ struct SceneData
     std::vector<SphereData> spheres;
     std::vector<MaterialData> materials;
     std::vector<TextureData> textures;
-    std::vector<Float4> texels; // decoded linear RGB, original image row order
+    std::vector<Float4> texels;             // decoded linear RGB, original image row order
+    std::vector<std::uint32_t> imageTexels; // Packed RGBA8; image.w: 1 = sRGB, 2 = linear data.
     AccretionDisk disk;
     float atmosphereHeight = 0.045f;
 
@@ -182,8 +185,8 @@ struct RenderSettings
 
 struct CameraData
 {
-    Vec3 position{4, 3, 9};
-    Vec3 lookAt{2, 0, -1};
+    Vec3 position{4, 3, 10};
+    Vec3 lookAt{2, 0, 0};
     Vec3 up{0, 1, 0};
     double verticalFov = 75;
 

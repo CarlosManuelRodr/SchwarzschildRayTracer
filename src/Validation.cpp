@@ -608,8 +608,8 @@ int runGpuTests(const std::filesystem::path& assets)
     movingSettings.samples = 30;
     movingSettings.exposure = 8;
     CameraData insideCamera;
-    insideCamera.position = {0, 0.8, -1};
-    insideCamera.lookAt = {4, 0, -1};
+    insideCamera.position = {0, 0.8, 0};
+    insideCamera.lookAt = {4, 0, 0};
     insideCamera.verticalFov = 120;
     gpu.uploadScene(scene);
     gpu.reset(movingSettings, insideCamera);
@@ -683,8 +683,8 @@ int runGpuTests(const std::filesystem::path& assets)
     for (double radius : {0.5, 1.0})
     {
         CameraData invalidCamera;
-        invalidCamera.position = {radius, 0, -1};
-        invalidCamera.lookAt = {radius + 1, 0, -1};
+        invalidCamera.position = {radius, 0, 0};
+        invalidCamera.lookAt = {radius + 1, 0, 0};
         gpu.reset(movingSettings, invalidCamera);
         waitFor(gpu);
         auto invalidImage = gpu.readback();

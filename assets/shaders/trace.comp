@@ -14,6 +14,7 @@ struct MaterialData
 {
     ivec4 kindTexture;
     vec4 parameters;
+    ivec4 layers;
 };
 
 struct TextureData
@@ -76,6 +77,11 @@ layout(std430, binding = 5) buffer Counters
 layout(std430, binding = 6) readonly buffer TestRays
 {
     TestRay testRays[];
+};
+
+layout(std430, binding = 7) readonly buffer ImageTexels
+{
+    uint imageTexels[];
 };
 
 layout(rgba32f, binding = 0) uniform image2D accumulation;
@@ -144,6 +150,11 @@ int materialKind(int i)
 int materialTexture(int i)
 {
     return materials[i].kindTexture.y;
+}
+
+int materialLayer(int i, int layer)
+{
+    return materials[i].layers[layer];
 }
 
 real materialParameter(int i)
@@ -226,12 +237,32 @@ vec3 textureColor(int i)
     return textures[i].color.xyz;
 }
 
+vec3 imageTexel(int i, int x, int y)
+{
+    ivec4 t = textures[i].image;
+    x = (x % t.y + t.y) % t.y;
+    y = clamp(y, 0, t.z - 1);
+    if (t.w == 0)
+        return texels[t.x + x + y * t.y].xyz;
+    uint texelBits = imageTexels[t.x + x + y * t.y];
+    vec3 c = vec3(texelBits & 255u, (texelBits >> 8) & 255u, (texelBits >> 16) & 255u) / 255.0;
+    if (t.w == 1)
+        c = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), greaterThan(c, vec3(0.04045)));
+    return c;
+}
+
 vec3 imageValue(int i, real u, real v)
 {
-    ivec3 t = textures[i].image.xyz;
-    int x = clamp(int(u * float(t.y)), 0, t.y - 1),
-        y = clamp(int((1.0 - v) * float(t.z) - 0.001), 0, t.z - 1);
-    return texels[t.x + x + y * t.y].xyz;
+    ivec4 t = textures[i].image;
+    if (t.w == 0)
+        return imageTexel(
+            i, clamp(int(u * t.y), 0, t.y - 1), clamp(int((1.0 - v) * t.z - 0.001), 0, t.z - 1));
+    vec2 p = vec2(u * t.y, (1.0 - v) * t.z) - 0.5;
+    ivec2 base = ivec2(floor(p));
+    vec2 f = fract(p);
+    return mix(mix(imageTexel(i, base.x, base.y), imageTexel(i, base.x + 1, base.y), f.x),
+               mix(imageTexel(i, base.x, base.y + 1), imageTexel(i, base.x + 1, base.y + 1), f.x),
+               f.y);
 }
 
 real maximumStep()

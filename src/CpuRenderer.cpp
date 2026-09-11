@@ -75,6 +75,12 @@ int materialTexture(int i)
     return scene->materials[i].kindTexture.y;
 }
 
+int materialLayer(int i, int layer)
+{
+    auto t = scene->materials[i].layers;
+    return layer == 0 ? t.x : layer == 1 ? t.y : layer == 2 ? t.z : t.w;
+}
+
 real materialParameter(int i)
 {
     return scene->materials[i].parameters.x;
@@ -169,13 +175,33 @@ vec3 textureColor(int i)
     return {c.x, c.y, c.z};
 }
 
+vec3 imageTexel(int i, int x, int y)
+{
+    auto t = scene->textures[i].image;
+    x = (x % t.y + t.y) % t.y;
+    y = clamp(y, 0, t.z - 1);
+    if (t.w == 0)
+    {
+        auto c = scene->texels[t.x + x + y * t.y];
+        return {c.x, c.y, c.z};
+    }
+    auto packed = scene->imageTexels[t.x + x + y * t.y];
+    float r = (packed & 255u) / 255.f;
+    float g = ((packed >> 8) & 255u) / 255.f;
+    float b = ((packed >> 16) & 255u) / 255.f;
+    return t.w == 1 ? vec3(decodeSrgb(r), decodeSrgb(g), decodeSrgb(b)) : vec3(r, g, b);
+}
+
 vec3 imageValue(int i, real u, real v)
 {
     auto t = scene->textures[i].image;
-    int x = clamp(int(u * t.y), 0, t.y - 1), y = clamp(int((1 - v) * t.z - 0.001), 0, t.z - 1);
-    auto c = scene->texels[t.x + x + y * t.y];
-
-    return {c.x, c.y, c.z};
+    if (t.w == 0)
+        return imageTexel(i, clamp(int(u * t.y), 0, t.y - 1), clamp(int((1 - v) * t.z - 0.001), 0, t.z - 1));
+    double x = u * t.y - 0.5, y = (1 - v) * t.z - 0.5;
+    int ix = int(floor(x)), iy = int(floor(y));
+    double fx = x - ix, fy = y - iy;
+    return (1 - fy) * ((1 - fx) * imageTexel(i, ix, iy) + fx * imageTexel(i, ix + 1, iy)) +
+           fy * ((1 - fx) * imageTexel(i, ix, iy + 1) + fx * imageTexel(i, ix + 1, iy + 1));
 }
 
 real maximumStep()
@@ -338,6 +364,17 @@ void runCoreTests()
     require(reference::textureValue(1, 0, 0, {-1, 1, 1}).x == 1 &&
             reference::textureValue(1, 0, 0, {1, 1, 1}).y == 1);
     require(encodeSrgb(decodeSrgb(0.5f)) == 128);
+    // Packed color is decoded before filtering; data maps remain linear.
+    TextureData packedImage;
+    packedImage.kindChildren.x = Image;
+    packedImage.image = {0, 2, 1, 1};
+    scene.imageTexels = {0x00808080u, 0x00ffffffu};
+    scene.textures.push_back(packedImage);
+    require(std::abs(reference::imageValue(4, 0.25, 0.5).x - decodeSrgb(128.f / 255.f)) < 1e-7);
+    require(reference::length(reference::imageValue(4, 0, 0.5) - reference::imageValue(4, 1, 0.5)) < 1e-12);
+    scene.textures[4].image.w = 2;
+    require(std::abs(reference::imageValue(4, 0.25, 0.5).x - 128.0 / 255) < 1e-7);
+
     std::uint32_t a = 1, b = 1;
 
     for (int i = 0; i < 100; ++i)
@@ -366,12 +403,35 @@ void runCoreTests()
     require(reference::diskFrequencyShift({4, 0, 0}, {0, 0, -1}, 1) == 1);
     settings.redshift = true;
 
+    scene.textures[0].kindChildren.x = Constant;
+    scene.textures[0].color = {1, 1, 1, 0};
     scene.materials[0] = {{DiffuseLight, 0, 0, 0}, {0, 5778, 1, 0.6f}};
     auto source = reference::makeHit(0, {0, 0, 8}, {0, 0, 1}, 0);
     auto centerLight = reference::surfaceRadiance(source, {0, 0, 1}, 1);
     auto limbLight = reference::surfaceRadiance(source, {1, 0, 0}, 1);
     require(std::abs(limbLight.y / centerLight.y - (1.0 - double(0.6f))) < 1e-6);
     require(toneMap(100) >= toneMap(10) && toneMap(10) > toneMap(1));
+
+    // An unlit hemisphere emits city lights; clouds attenuate them. Daylight
+    // must not add city emission. Use fixed samples to isolate the layer effect.
+    SceneData layered;
+    TextureData white, city, cloud;
+    white.color = {1, 1, 1, 0};
+    city.color = {1, 0, 0, 0};
+    cloud.color = {0, 0, 0, 0};
+    layered.textures = {white, city, cloud};
+    layered.materials = {{{Earth, 0, 0, 0}, {}, {1, 2, -1, -1}}, {{DiffuseLight, 0, 0, 0}, {}}};
+    layered.spheres = {{{0, 0, 0, 1}, {0, 0, 0, 0}}, {{0, 0, 5, 0.5f}, {1, 0, 0, 0}}};
+    auto cityLight = traceCpu(layered, settings, {0, 0, -3}, {0, 0, 1});
+    require(cityLight.color.x > 0.4 && cityLight.color.x <= 0.6 && cityLight.color.y == 0);
+    layered.textures[2].color = {1, 1, 1, 0};
+    auto obscuredCity = traceCpu(layered, settings, {0, 0, -3}, {0, 0, 1});
+    require(obscuredCity.color.x < cityLight.color.x * 0.2);
+    auto day = traceCpu(layered, settings, {0, 0, 3}, {0, 0, -1});
+    layered.materials[0].layers.x = -1;
+    require(reference::length(day.color - traceCpu(layered, settings, {0, 0, 3}, {0, 0, -1}).color) < 1e-12);
+    reference::scene = &scene;
+    reference::settings = &settings;
 
     // Independent null constraint and angular momentum checks for boosted
     // horizon-crossing initial data; legacy tests above intentionally use the old frame.

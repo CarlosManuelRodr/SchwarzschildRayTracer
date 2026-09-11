@@ -46,7 +46,8 @@ class SdlGlWindow
             SDL_CreateWindow("Schwarzschild GPU",
                              width,
                              height,
-                             SDL_WINDOW_OPENGL | (hidden ? SDL_WINDOW_HIDDEN : SDL_WINDOW_RESIZABLE)));
+                             SDL_WINDOW_OPENGL | (hidden ? SDL_WINDOW_HIDDEN
+                                                         : (SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED))));
         checkSdl(bool(window), "Create OpenGL window");
         context = SDL_GL_CreateContext(window.get());
         checkSdl(context != nullptr, "Create OpenGL 4.3 context");
