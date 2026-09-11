@@ -251,7 +251,9 @@ int main(int argc, char** argv)
         bool running = true, minimized = false;
         bool focused = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS) != 0;
         bool dragging = false;
-        SDL_FPoint mousePosition{};
+        SDL_FPoint mousePosition{}, clickPosition{};
+        bool lookMoved = false;
+        bool geometryDirty = false;
         constexpr double mouseSensitivity = 0.004;
         auto last = Clock::now(), titleTime = last;
         auto lastMovement = last;
@@ -311,6 +313,18 @@ int main(int argc, char** argv)
                 {
                     dragging = true;
                     mousePosition = {event.button.x, event.button.y};
+                    clickPosition = mousePosition;
+                    lookMoved = false;
+                }
+
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT &&
+                    dragging && !lookMoved && !captureMouse && focused && !minimized)
+                {
+                    int width = 0, height = 0;
+                    rt::checkSdl(SDL_GetWindowSize(window.get(), &width, &height), "Get picking viewport");
+                    if (width > 0 && height > 0)
+                        panel.selectBody(
+                            renderer.pickDisplayed(event.button.x / width, 1.0 - event.button.y / height));
                 }
 
                 if ((event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT) ||
@@ -322,6 +336,11 @@ int main(int argc, char** argv)
                 {
                     SDL_FPoint position{event.motion.x, event.motion.y};
                     SDL_FPoint delta{position.x - mousePosition.x, position.y - mousePosition.y};
+                    if (!lookMoved &&
+                        std::hypot(position.x - clickPosition.x, position.y - clickPosition.y) >= 4)
+                        lookMoved = true;
+                    if (!lookMoved)
+                        continue;
                     mousePosition = position;
 
                     if (delta.x != 0 || delta.y != 0)
@@ -421,6 +440,15 @@ int main(int argc, char** argv)
             panel.beginFrame();
             auto actions =
                 panel.draw(slowMovementStep, renderer.progress(), activeSettings, preview, camera, scene);
+            if (actions.body >= 0 && actions.body < int(scene.spheres.size()))
+            {
+                auto& center = scene.spheres[actions.body].centerRadius;
+                center.x = float(actions.bodyPosition.x);
+                center.y = float(actions.bodyPosition.y);
+                center.z = float(actions.bodyPosition.z);
+                geometryDirty = true;
+                reset = true;
+            }
             if (actions.positionChanged)
             {
                 camera.lookAt += actions.position - camera.position;
@@ -499,6 +527,11 @@ int main(int argc, char** argv)
                 matchWindow = pendingMatchWindow;
                 preview = false;
                 activeSettings = settings;
+                if (geometryDirty)
+                {
+                    renderer.updateGeometry(scene);
+                    geometryDirty = false;
+                }
                 renderer.reset(activeSettings, camera);
                 cameraPending = false;
                 renderSettingsPending = false;
@@ -520,6 +553,11 @@ int main(int argc, char** argv)
                     activeSettings.samples = 1;
                 }
 
+                if (geometryDirty)
+                {
+                    renderer.updateGeometry(scene);
+                    geometryDirty = false;
+                }
                 renderer.reset(activeSettings, camera);
                 cameraPending = false;
             }

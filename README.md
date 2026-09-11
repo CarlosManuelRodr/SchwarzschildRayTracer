@@ -8,6 +8,21 @@ and are licensed under [Creative Commons Attribution 4.0 International (CC BY 4.
 The TIFF data maps were converted to lossless PNG runtime copies with identical
 RGB pixels for use in this app.
 
+## Experiment playground
+
+Click Earth, Moon, Sun, the black-hole shadow, or its accretion disk to select it.
+Picking traces the light path using the displayed camera and scene, including lensing.
+The **Body transform** panel provides exact world XYZ coordinates, a body selector,
+and **Reset position** to restore that body's startup position.
+
+Drag the red X, green Y or blue Z arrow to translate along a world axis. Drag the
+yellow center to translate in the view plane. The handles are geometric editing
+overlays, not lensed objects; under strong lensing they can differ from the body's
+apparent image, and off-screen handles remain editable through the panel.
+Left-drag elsewhere still rotates the camera. F1 hides the panels and gizmo.
+Moving the black hole also moves its accretion disk and gravity field. Other bodies
+move independently. Scene edits restart progressive rendering without reloading textures.
+
 ## Updated scene assets
 
 The black hole is at `(0, 0, 0)`. Earth remains 7 scene units from it; the Sun's

@@ -13,6 +13,8 @@ struct PanelActions
     bool positionChanged = false;
     bool resetCamera = false;
     Vec3 position;
+    int body = -1;
+    Vec3 bodyPosition;
 };
 
 class SettingsPanel
@@ -34,6 +36,13 @@ class SettingsPanel
                       const CameraData& camera,
                       const SceneData& scene);
     void render();
+    void selectBody(int body);
+
+    bool manipulatingBody() const
+    {
+        return dragAxis >= 0;
+    }
+
     void syncResolution(int width, int height);
     void setStatus(const std::string& message, bool error = false);
 
@@ -48,6 +57,18 @@ class SettingsPanel
     }
 
   private:
+    void drawBodyEditor(PanelActions&, const CameraData&, const SceneData&, double aspect);
+    void processGizmoEvent(const SDL_Event&);
+    int selectedBody = -1;
+    int dragAxis = -1; // XYZ or 3 for translation in the view plane.
+    bool editorOpen = false, gizmoVisible = false, bodyEditPending = false;
+    SDL_FPoint gizmoOrigin{}, dragStart{};
+    std::array<SDL_FPoint, 3> gizmoEnds{};
+    Vec3 displayedBodyPosition, dragBodyPosition, pendingBodyPosition;
+    Vec3 gizmoRight, gizmoUp, dragRight, dragUp;
+    double gizmoLength = 1, dragLength = 1, gizmoPixelScale = 1, dragPixelScale = 1;
+    SDL_FPoint dragScreenAxis{};
+    std::vector<Vec3> originalBodyPositions;
     RenderSettings draft;
     float uiScale = 1.0f;
     bool visible = true;

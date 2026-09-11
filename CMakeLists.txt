@@ -16,6 +16,7 @@ find_package(GLEW REQUIRED)
 add_executable(SchwarzschildRayTracer
     src/Main.cpp
     src/SettingsPanel.cpp
+    src/BodyEditor.cpp
     src/SceneData.cpp
     src/StbImage.cpp
     src/Blackbody.cpp

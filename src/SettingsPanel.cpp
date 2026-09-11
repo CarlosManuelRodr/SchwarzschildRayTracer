@@ -41,9 +41,12 @@ SettingsPanel::~SettingsPanel()
 void SettingsPanel::processEvent(const SDL_Event& event)
 {
     ImGui_ImplSDL3_ProcessEvent(&event);
+    processGizmoEvent(event);
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_F1)
     {
         visible = !visible;
+        dragAxis = -1;
+        gizmoVisible = false;
         if (!visible)
             ImGui::SetWindowFocus(nullptr);
     }
@@ -51,12 +54,12 @@ void SettingsPanel::processEvent(const SDL_Event& event)
 
 bool SettingsPanel::capturesMouse() const
 {
-    return ImGui::GetIO().WantCaptureMouse;
+    return ImGui::GetIO().WantCaptureMouse || manipulatingBody();
 }
 
 bool SettingsPanel::capturesKeyboard() const
 {
-    return ImGui::GetIO().WantCaptureKeyboard;
+    return ImGui::GetIO().WantCaptureKeyboard || manipulatingBody();
 }
 
 void SettingsPanel::beginFrame()
@@ -75,7 +78,10 @@ PanelActions SettingsPanel::draw(double& slowStep,
 {
     PanelActions actions;
     if (!visible)
+    {
+        gizmoVisible = false;
         return actions;
+    }
 
     ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_FirstUseEver);
     const auto display = ImGui::GetIO().DisplaySize;
@@ -157,7 +163,8 @@ PanelActions SettingsPanel::draw(double& slowStep,
             ImGui::PopStyleColor();
         }
         if (ImGui::CollapsingHeader("Controls"))
-            ImGui::TextWrapped("Left-drag: look. WASD / arrows: move. Q / E: up / down. Shift: precision. P: "
+            ImGui::TextWrapped("Click a body: select. Drag gizmo: move body. Left-drag elsewhere: look. WASD "
+                               "/ arrows: move. Q / E: up / down. Shift: precision. P: "
                                "save PNG. Escape: exit.");
     }
     ImGui::End();
@@ -249,6 +256,7 @@ PanelActions SettingsPanel::draw(double& slowStep,
         }
     }
     ImGui::End();
+    drawBodyEditor(actions, camera, scene, double(active.width) / active.height);
     ImGui::PopItemFlag();
     return actions;
 }

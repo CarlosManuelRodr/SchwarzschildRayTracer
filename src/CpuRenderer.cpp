@@ -244,6 +244,9 @@ int maximumAttempts()
     return settings->maxIntegrationAttempts;
 }
 
+thread_local bool picking = false;
+thread_local int pickedBody = -1;
+
 #define INOUT(T) T&
 #define OUT(T) T&
 #include "../assets/shaders/TraceCore.inl"
@@ -262,6 +265,25 @@ RayResult traceCpu(
     while (s.status == 0)
         reference::advanceTrace(s);
     return {s.radiance, s.p, s.v, s.status, s.attempts};
+}
+
+int pickBody(
+    const SceneData& scene, const RenderSettings& settings, const CameraData& camera, double u, double v)
+{
+    auto observer = observerSettings(scene, settings, camera);
+    auto basis = camera.basis(double(settings.width) / settings.height);
+    reference::picking = true;
+    reference::pickedBody = -1;
+    auto result = traceCpu(scene, observer, basis[0], basis[1] + u * basis[2] + v * basis[3] - basis[0]);
+    reference::picking = false;
+    int body = reference::pickedBody;
+    if (body < 0 && result.status == 3)
+        for (int i = 0; i < int(scene.spheres.size()); ++i)
+            if (scene.materials[scene.spheres[i].material.x].kindTexture.x == Schwarzschild)
+                body = i;
+    if (body >= 0 && scene.materials[scene.spheres[body].material.x].kindTexture.x == Environment)
+        return -1;
+    return body;
 }
 
 std::vector<Float4> renderCpu(const SceneData& scene,

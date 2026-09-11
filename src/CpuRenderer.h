@@ -16,6 +16,7 @@ std::vector<Float4> renderCpu(const SceneData&,
                               const RenderSettings&,
                               const CameraData&,
                               std::uint64_t* failures = nullptr);
+int pickBody(const SceneData&, const RenderSettings&, const CameraData&, double u, double v);
 int runCpuTests();
 int runGpuTests(const std::filesystem::path& assets);
 } // namespace rt

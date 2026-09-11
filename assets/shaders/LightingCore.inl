@@ -400,6 +400,10 @@ void transferCorona(INOUT(TraceState) state, vec3 direction, real maximum)
 // exponential density profile; the planet itself blocks the night-side source.
 void transferAtmosphere(INOUT(TraceState) state, vec3 direction, real maximum)
 {
+#ifdef __cplusplus
+    if (picking)
+        return;
+#endif
     transferCorona(state, direction, maximum);
     int earth = planet();
     if (earth < 0 || maximum <= real(0))

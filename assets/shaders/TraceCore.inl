@@ -248,6 +248,14 @@ void failTrace(INOUT(TraceState) s)
 
 void scatterSurface(INOUT(TraceState) s, SurfaceHit hit)
 {
+#ifdef __cplusplus
+    if (picking)
+    {
+        pickedBody = hit.sphere;
+        s.status = 1;
+        return;
+    }
+#endif
     int mat = sphereMaterial(hit.sphere);
     int kind = materialKind(mat);
     vec3 color = textureValue(materialTexture(mat), hit.u, hit.v, hit.p);
@@ -576,6 +584,14 @@ void integrateField(INOUT(TraceState) s)
         s.status = 3;
     else if (eventKind == 4)
     {
+#ifdef __cplusplus
+        if (picking)
+        {
+            pickedBody = blackHole();
+            s.status = 1;
+            return;
+        }
+#endif
         s.radiance += s.throughput * diskRadiance(s.p, -s.v, s.observerLapse);
         s.status = 1;
     }
@@ -632,6 +648,14 @@ void advanceTrace(INOUT(TraceState) s)
     if (hitDisk)
     {
         s.p = s.p + diskDistance * s.v;
+#ifdef __cplusplus
+        if (picking)
+        {
+            pickedBody = blackHole();
+            s.status = 1;
+            return;
+        }
+#endif
         s.radiance += s.throughput * diskRadiance(s.p, -s.v, s.observerLapse);
         s.status = 1;
         return;

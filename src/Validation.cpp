@@ -1,6 +1,7 @@
 #include <GL/glew.h>
 #include "GpuRenderer.h"
 #include "SdlSupport.h"
+#include "SettingsPanel.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -131,6 +132,28 @@ int runCpuTests()
     settings.useObserverFrame = false;
     require(settings.integrationMode == RenderSettings::FixedRadius, "Fixed radius must be the default");
     settings.integrationMode = RenderSettings::FullScene;
+    CameraData pickCamera;
+    pickCamera.position = {0, 0, 3};
+    pickCamera.lookAt = {0, 0, 0};
+    RenderSettings pickSettings;
+    for (int kind : {int(Earth), int(Moon), int(DiffuseLight)})
+    {
+        auto body = surfaceScene(kind);
+        require(pickBody(body, pickSettings, pickCamera, 0.5, 0.5) == 0,
+                "Picking must identify the visible body");
+    }
+    auto emptySky = surfaceScene(Environment);
+    require(pickBody(emptySky, pickSettings, pickCamera, 0.5, 0.5) == -1,
+            "The environment must not be selectable");
+    auto pickHole = fieldScene();
+    require(pickBody(pickHole, pickSettings, pickCamera, 0.5, 0.5) == 0,
+            "Captured rays must select the black hole");
+    pickHole.disk.enabled = true;
+    pickCamera.position = {4, 2, 0};
+    pickCamera.lookAt = {4, 0, 0};
+    pickCamera.up = {0, 0, 1};
+    require(pickBody(pickHole, pickSettings, pickCamera, 0.5, 0.5) == 0,
+            "Clicking the accretion disk must select its black hole");
     auto field = fieldScene();
     field.validate();
     require(traceCpu(field, settings, {0, 0, 4}, {0, 0, -1}).status == 3, "Radial ray must be captured");
@@ -695,6 +718,68 @@ int runGpuTests(const std::filesystem::path& assets)
                                 return pixel.x == 0 && pixel.y == 0 && pixel.z == 0;
                             }),
                 "GPU hovering must remain invalid inside the horizon instead of switching frames");
+    }
+    // Position updates preserve textures and pick against the displayed snapshot,
+    // including while a replacement scene is still being rendered.
+    auto editedScene = surfaceScene(DiffuseLight);
+    CameraData editCamera;
+    editCamera.position = {0, 0, 3};
+    editCamera.lookAt = {0, 0, 0};
+    RenderSettings editSettings;
+    editSettings.width = 32;
+    editSettings.height = 24;
+    editSettings.samples = 1;
+    gpu.uploadScene(editedScene);
+    gpu.reset(editSettings, editCamera);
+    waitFor(gpu);
+    require(gpu.pickDisplayed(0.5, 0.5) == 0, "Displayed body picking failed");
+    editedScene.spheres[0].centerRadius.x = 5;
+    gpu.updateGeometry(editedScene);
+    gpu.reset(editSettings, editCamera);
+    require(gpu.pickDisplayed(0.5, 0.5) == 0, "Pending edit must pick the retained scene");
+    waitFor(gpu);
+    require(gpu.pickDisplayed(0.5, 0.5) == -1, "Completed edit must pick the new scene");
+    require(imageRmse(gpu.readback(), renderCpu(editedScene, editSettings, editCamera)) < 1e-5,
+            "Geometry-only upload must match the CPU reference");
+    editedScene.spheres[0].centerRadius.x = 0;
+    gpu.updateGeometry(editedScene);
+    gpu.reset(editSettings, editCamera);
+    waitFor(gpu);
+    require(gpu.pickDisplayed(0.5, 0.5) == 0, "Reset body position must restore picking");
+
+    // Exercise a real ImGui frame and synthetic SDL handle drag in a hidden window.
+    auto window = SDL_GL_GetCurrentWindow();
+    checkSdl(SDL_SetWindowSize(window, 1200, 800), "Size editor test window");
+    {
+        SettingsPanel panel(window, editSettings);
+        panel.selectBody(0);
+        double slowStep = 0.0005;
+        editSettings.width = 1200;
+        editSettings.height = 800;
+        panel.beginFrame();
+        panel.draw(slowStep, gpu.progress(), editSettings, false, editCamera, editedScene);
+        panel.render();
+        SDL_Event press{};
+        press.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+        press.button.button = SDL_BUTTON_LEFT;
+        press.button.x = 650;
+        press.button.y = 400;
+        panel.processEvent(press);
+        require(panel.manipulatingBody(), "X translation handle must capture the mouse");
+        SDL_Event move{};
+        move.type = SDL_EVENT_MOUSE_MOTION;
+        move.motion.x = 680;
+        move.motion.y = 400;
+        panel.processEvent(move);
+        panel.beginFrame();
+        auto actions = panel.draw(slowStep, gpu.progress(), editSettings, false, editCamera, editedScene);
+        panel.render();
+        require(actions.body == 0 && actions.bodyPosition.x > 0 && actions.bodyPosition.y == 0 &&
+                    actions.bodyPosition.z == 0,
+                "X handle must translate only the selected body's X axis");
+        press.type = SDL_EVENT_MOUSE_BUTTON_UP;
+        panel.processEvent(press);
+        require(!panel.manipulatingBody(), "Releasing the handle must restore navigation");
     }
     std::cout << "GPU tests passed: trajectories, materials/textures, deterministic rendering, "
                  "cancellation/resize, presentation, PNG, missing assets.\n";

@@ -121,6 +121,8 @@ struct GpuRenderer::Impl
     GLuint texture = 0;
     GLuint displayedTexture = 0;
     RenderSettings displayedSettings;
+    CameraData camera, displayedCamera;
+    SceneData displayedGeometry;
     GLuint buffers[8]{};
     GLuint query = 0;
 
@@ -251,6 +253,7 @@ void GpuRenderer::uploadScene(const SceneData& scene)
 {
     impl->observerGeometry.spheres = scene.spheres;
     impl->observerGeometry.materials = scene.materials;
+    impl->observerGeometry.disk = scene.disk;
     scene.validate();
     auto& g = *impl;
     g.wait();
@@ -294,6 +297,30 @@ void GpuRenderer::uploadScene(const SceneData& scene)
     checkGl("Scene upload");
 }
 
+void GpuRenderer::updateGeometry(const SceneData& scene)
+{
+    auto& g = *impl;
+    if (scene.spheres.size() != g.observerGeometry.spheres.size())
+        throw std::runtime_error("Geometry edits must preserve body indices");
+    for (auto sphere : scene.spheres)
+        if (!std::isfinite(sphere.centerRadius.x) || !std::isfinite(sphere.centerRadius.y) ||
+            !std::isfinite(sphere.centerRadius.z))
+            throw std::runtime_error("Body position must be finite");
+    g.wait();
+    poll();
+    g.buffer(0, scene.spheres.data(), scene.spheres.size() * sizeof(SphereData));
+    g.observerGeometry.spheres = scene.spheres;
+    checkGl("Update body positions");
+}
+
+int GpuRenderer::pickDisplayed(double u, double v) const
+{
+    const auto& g = *impl;
+    if (!g.displayedTexture || u < 0 || u > 1 || v < 0 || v > 1)
+        return -1;
+    return pickBody(g.displayedGeometry, g.displayedSettings, g.displayedCamera, u, v);
+}
+
 void GpuRenderer::reset(const RenderSettings& settings, const CameraData& camera)
 {
     settings.validate();
@@ -332,6 +359,7 @@ void GpuRenderer::reset(const RenderSettings& settings, const CameraData& camera
     glBindImageTexture(0, g.texture, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
 
     g.settings = settings;
+    g.camera = camera;
     g.stats = {};
     g.resetPending = true;
     g.hasImage = false;
@@ -429,6 +457,8 @@ bool GpuRenderer::poll()
                            g.settings.height,
                            1);
         g.displayedSettings = g.settings;
+        g.displayedCamera = g.camera;
+        g.displayedGeometry = g.observerGeometry;
     }
     checkGl("GPU completion");
 
