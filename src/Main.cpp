@@ -229,6 +229,7 @@ int main(int argc, char** argv)
 
         auto scene = rt::defaultScene(assets);
         rt::CameraData camera;
+        const rt::CameraData initialCamera = camera;
         rt::SdlGlWindow window(settings.width, settings.height);
         if (!SDL_GL_SetSwapInterval(1))
             std::cerr << "VSync unavailable: " << SDL_GetError() << '\n';
@@ -414,6 +415,17 @@ int main(int argc, char** argv)
             panel.beginFrame();
             auto actions =
                 panel.draw(slowMovementStep, renderer.progress(), activeSettings, preview, camera, scene);
+            if (actions.positionChanged)
+            {
+                camera.lookAt += actions.position - camera.position;
+                camera.position = actions.position;
+                reset = true;
+            }
+            if (actions.resetCamera)
+            {
+                camera = initialCamera;
+                reset = true;
+            }
             if (actions.save)
                 saveImage();
             if (actions.renderChanged)

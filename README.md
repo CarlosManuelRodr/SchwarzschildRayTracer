@@ -2,7 +2,7 @@
 
 ## Observer velocity and views inside the horizon
 
-The properties panel offers **Hovering** (default) and **Freely falling** observers.
+The Physical state panel offers **Hovering** (default) and **Freely falling** observers.
 Velocity is view-relative: **Right/Left**, **Up/Down**, and **Forward/Backward**.
 The directions rotate with the view, including pitch. Hovering at zero velocity
 preserves the original exterior image exactly; freely falling at zero means a
@@ -10,13 +10,16 @@ rain observer falling from rest at infinity. The combined speed is constrained t
 camera rest frame does not exist at exactly c. The camera stays where you place
 it; changing velocity modifies aberration and the measured color/brightness.
 
-At or inside the event horizon, the renderer automatically uses horizon-crossing
-backward rays and full integration to view exterior sources. Outside, the selected
-fixed-radius/full-scene/adaptive mode is retained. Full-scene mode gives the most
-consistent transition across the horizon. Hovering is impossible at/inside the
-horizon, so the freely falling frame is used there automatically. The selected
-exterior observer type returns when the camera moves outside. Choose Freely
-falling on both sides to avoid a reference-frame change at the horizon.
+Observer types never switch automatically. Hovering is undefined at or inside
+the horizon and displays black with an explanation in the panel. Select Freely
+falling explicitly to visualize the interior; it uses full integration there.
+Outside, the selected integration mode is retained. Freely falling with full-scene
+integration on both sides provides a consistent horizon crossing.
+
+The Physical state panel shows editable world position, view-relative velocity,
+distance to the black-hole center, and the event horizon radius (1 scene unit).
+Reset position and view restores the startup camera without changing velocity
+or render settings. F1 hides or shows both panels.
 
 See [Observer and horizon equations](docs/observer-and-horizon.md) for the English
 derivation, reference-frame conventions, frequency shifts, validation, and model

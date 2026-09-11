@@ -217,6 +217,12 @@ void initTrace(OUT(TraceState) s, vec3 p, vec3 v, uint seed)
                 s.observerMode = 3;
         }
 
+        if (hoveringObserver() && s.observerMode >= 2)
+        {
+            s.status = 3; // A static observer has no timelike frame at or inside the horizon.
+            return;
+        }
+
         // Past-directed affine spatial tangent in ingoing Painleve-Gullstrand
         // coordinates. This remains finite on the future event horizon.
         s.v = flow * frequency - momentum;

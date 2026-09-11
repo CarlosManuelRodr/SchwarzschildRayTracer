@@ -127,7 +127,7 @@ int runCpuTests()
     settings.observerVelocity = Vec3(0);
     velocityCamera.position = {0, 0, 0.5};
     require(observerSettings(velocityScene, settings, velocityCamera).useObserverFrame,
-            "Hovering selection must activate a physical interior frame automatically");
+            "Interior hovering must reach observer validation, not the legacy camera path");
     settings.useObserverFrame = false;
     require(settings.integrationMode == RenderSettings::FixedRadius, "Fixed radius must be the default");
     settings.integrationMode = RenderSettings::FullScene;
@@ -235,6 +235,11 @@ int runCpuTests()
     observerScene.materials.push_back({{Environment, 0, 0, 0}, {1, 0, 0, 0}});
     observerScene.spheres.push_back({{0, 0, 0, 20}, {1, 0, 0, 0}});
     RenderSettings observerSettings;
+    for (double radius : {0.5, 1.0})
+    {
+        require(traceCpu(observerScene, observerSettings, {radius, 0, 0}, {1, 0, 0}).status == 3,
+                "Hovering must not silently switch to a falling observer inside the horizon");
+    }
     observerSettings.observerType = RenderSettings::FreelyFalling;
     observerSettings.integrationMode = RenderSettings::FullScene;
     for (double radius : {0.25, 0.9, 0.9999, 1.0, 1.0001, 2.0, 8.0})
@@ -675,6 +680,22 @@ int runGpuTests(const std::filesystem::path& assets)
     waitFor(gpu);
     require(imageRmse(gpu.readback(), renderCpu(scene, movingSettings, CameraData{})) < 0.06,
             "Moving hovering observer must agree on CPU/GPU");
+    for (double radius : {0.5, 1.0})
+    {
+        CameraData invalidCamera;
+        invalidCamera.position = {radius, 0, -1};
+        invalidCamera.lookAt = {radius + 1, 0, -1};
+        gpu.reset(movingSettings, invalidCamera);
+        waitFor(gpu);
+        auto invalidImage = gpu.readback();
+        require(std::all_of(invalidImage.begin(),
+                            invalidImage.end(),
+                            [](Float4 pixel)
+                            {
+                                return pixel.x == 0 && pixel.y == 0 && pixel.z == 0;
+                            }),
+                "GPU hovering must remain invalid inside the horizon instead of switching frames");
+    }
     std::cout << "GPU tests passed: trajectories, materials/textures, deterministic rendering, "
                  "cancellation/resize, presentation, PNG, missing assets.\n";
     return 0;

@@ -10,6 +10,9 @@ struct PanelActions
 {
     bool renderChanged = false;
     bool save = false;
+    bool positionChanged = false;
+    bool resetCamera = false;
+    Vec3 position;
 };
 
 class SettingsPanel

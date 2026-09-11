@@ -30,8 +30,8 @@ e_{(0)}=(1,-\mathbf w),\qquad e_{(i)}=(0,\hat{\mathbf e}_i).
 
 Its reference observers fall radially from rest at infinity. The mathematical
 tetrad axes are world-aligned, but the user controls are view-relative. This
-frame is used on both sides when Freely falling is selected, and automatically
-at/inside the horizon when Hovering is selected.
+frame is used on both sides only when Freely falling is selected. Observer
+selection never changes automatically.
 
 ## View-relative controls and hovering observers
 
@@ -57,12 +57,12 @@ the Lorentz formulas below. With `α = sqrt(1−1/r)`, initialize
 Exactly zero hovering velocity deliberately uses the original exterior camera
 initialization and shading for exact visual compatibility. That path is an
 approximation, so an arbitrarily small nonzero velocity need not reproduce it
-exactly. At `r <= 1` the renderer uses the rain frame, retaining the exterior
-selection for when the camera returns outside. This frame change can change the
-image abruptly; select Freely falling before crossing for a continuous frame.
+exactly. At `r <= 1`, Hovering has no timelike observer frame, so rays terminate
+black and the Physical state panel explains the invalid selection. No rain-frame
+fallback is applied. Freely falling must be selected explicitly for interior views.
 
-The remaining rain-frame derivation applies to Freely falling and the automatic
-interior fallback. Zero velocity in these cases denotes infall, not hovering.
+The remaining rain-frame derivation applies only to Freely falling. Zero velocity
+in that mode denotes infall, not hovering.
 
 ## User velocity and the physical observer
 
@@ -159,7 +159,7 @@ previously unused storage lanes, without increasing the per-ray SSBO size.
 
 * An exterior camera retains the selected fixed-radius, full-scene, or adaptive
   geometry mode. Its initial rays and frequency shifts now include its velocity.
-* A camera at `r <= 1` automatically bypasses finite/adaptive cutoffs and uses
+* A Freely falling camera at `r <= 1` automatically bypasses finite/adaptive cutoffs and uses
   full spatial integration with the horizon-crossing initial data.
 * An interior observer's positive-energy past ray may cross `r = 1` outward.
   Crossing inward again is terminated as a dark past boundary.

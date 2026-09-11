@@ -143,7 +143,44 @@ PanelActions SettingsPanel::draw(double& slowStep,
             ImGui::Text("Shift movement: %.8g units/s", 20 * slowStep);
         }
 
-        if (ImGui::CollapsingHeader("Observer velocity", ImGuiTreeNodeFlags_DefaultOpen))
+        if (ImGui::Button("Save PNG"))
+            actions.save = true;
+        ImGui::Separator();
+        ImGui::Text("%s: %d x %d", preview ? "Preview" : "Refining", active.width, active.height);
+        ImGui::Text("Samples: %.1f / %d", progress.meanSamples, active.samples);
+        ImGui::Text("GPU batch: %.2f ms", progress.lastBatchMilliseconds);
+        if (!status.empty())
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text,
+                                  statusError ? ImVec4(1, 0.45f, 0.35f, 1) : ImVec4(0.6f, 0.9f, 0.7f, 1));
+            ImGui::TextWrapped("%s", status.c_str());
+            ImGui::PopStyleColor();
+        }
+        if (ImGui::CollapsingHeader("Controls"))
+            ImGui::TextWrapped("Left-drag: look. WASD / arrows: move. Q / E: up / down. Shift: precision. P: "
+                               "save PNG. Escape: exit.");
+    }
+    ImGui::End();
+    ImGui::SetNextWindowPos(ImVec2(std::max(12.0f, display.x - 370.0f * uiScale), 12),
+                            ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(std::min(350.0f * uiScale, std::max(180.0f, display.x - 24)),
+                                    std::min(560.0f * uiScale, std::max(100.0f, display.y - 24))),
+                             ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Physical state"))
+    {
+        double position[] = {camera.position.x, camera.position.y, camera.position.z};
+        if (ImGui::InputScalarN("Position XYZ", ImGuiDataType_Double, position, 3, nullptr, nullptr, "%.8g"))
+        {
+            if (std::isfinite(position[0]) && std::isfinite(position[1]) && std::isfinite(position[2]))
+            {
+                actions.position = {position[0], position[1], position[2]};
+                actions.positionChanged = true;
+            }
+        }
+        if (ImGui::Button("Reset position and view"))
+            actions.resetCamera = true;
+
+        if (ImGui::CollapsingHeader("Observer", ImGuiTreeNodeFlags_DefaultOpen))
         {
             int observerType = int(draft.observerType);
             const char* observers[] = {"Hovering", "Freely falling"};
@@ -198,32 +235,18 @@ PanelActions SettingsPanel::draw(double& slowStep,
                 Vec3 offset = camera.position -
                               Vec3(sphere.centerRadius.x, sphere.centerRadius.y, sphere.centerRadius.z);
                 double radius = std::sqrt(dot(offset, offset));
-                ImGui::Text("Observer radius: %.6f horizons", radius);
+                ImGui::Text("Distance to black-hole center: %.8g", radius);
+                ImGui::Text("Event horizon radius: 1 scene unit");
                 if (radius <= 1e-4)
                     ImGui::TextWrapped("Singularity guard: no physical observer frame is defined here.");
                 else if (radius <= 1)
-                    ImGui::TextWrapped("Horizon/interior: freely falling frame and full integration are used "
-                                       "automatically; hovering is impossible here. The selected exterior "
-                                       "type returns when you move outside.");
+                    ImGui::TextWrapped(
+                        draft.observerType == RenderSettings::Hovering
+                            ? "Hovering is undefined at or inside the horizon. The view is black. "
+                              "Select Freely falling to visualize the interior."
+                            : "Freely falling observer; full integration is used inside the horizon.");
             }
         }
-
-        if (ImGui::Button("Save PNG"))
-            actions.save = true;
-        ImGui::Separator();
-        ImGui::Text("%s: %d x %d", preview ? "Preview" : "Refining", active.width, active.height);
-        ImGui::Text("Samples: %.1f / %d", progress.meanSamples, active.samples);
-        ImGui::Text("GPU batch: %.2f ms", progress.lastBatchMilliseconds);
-        if (!status.empty())
-        {
-            ImGui::PushStyleColor(ImGuiCol_Text,
-                                  statusError ? ImVec4(1, 0.45f, 0.35f, 1) : ImVec4(0.6f, 0.9f, 0.7f, 1));
-            ImGui::TextWrapped("%s", status.c_str());
-            ImGui::PopStyleColor();
-        }
-        if (ImGui::CollapsingHeader("Controls"))
-            ImGui::TextWrapped("Left-drag: look. WASD / arrows: move. Q / E: up / down. Shift: precision. P: "
-                               "save PNG. Escape: exit.");
     }
     ImGui::End();
     ImGui::PopItemFlag();
