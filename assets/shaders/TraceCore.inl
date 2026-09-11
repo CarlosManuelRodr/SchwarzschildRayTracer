@@ -14,6 +14,7 @@ struct TraceState
     real observerLapse;
     real energy;
     int observerMode; // 0: legacy fixture, 1: exterior observer, 3: horizon/interior observer.
+    int body;         // First visible surface, for editor anchoring.
     int field;
     int attempts;
     int depth;
@@ -181,6 +182,7 @@ void initTrace(OUT(TraceState) s, vec3 p, vec3 v, uint seed)
     s.radiance = vec3(0);
     s.h2 = real(0);
     s.step = maximumStep();
+    s.body = -1;
     s.field = -1;
     s.attempts = 0;
     s.depth = 0;
@@ -248,6 +250,8 @@ void failTrace(INOUT(TraceState) s)
 
 void scatterSurface(INOUT(TraceState) s, SurfaceHit hit)
 {
+    if (s.body < 0)
+        s.body = hit.sphere;
 #ifdef __cplusplus
     if (picking)
     {
@@ -592,6 +596,8 @@ void integrateField(INOUT(TraceState) s)
             return;
         }
 #endif
+        if (s.body < 0)
+            s.body = blackHole();
         s.radiance += s.throughput * diskRadiance(s.p, -s.v, s.observerLapse);
         s.status = 1;
     }
@@ -656,6 +662,8 @@ void advanceTrace(INOUT(TraceState) s)
             return;
         }
 #endif
+        if (s.body < 0)
+            s.body = blackHole();
         s.radiance += s.throughput * diskRadiance(s.p, -s.v, s.observerLapse);
         s.status = 1;
         return;

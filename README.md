@@ -77,9 +77,12 @@ The **Body transform** panel provides exact world XYZ coordinates, a body select
 and **Reset position** to restore that body's startup position.
 
 Drag the red X, green Y or blue Z arrow to translate along a world axis. Drag the
-yellow center to translate in the view plane. The handles are geometric editing
-overlays, not lensed objects; under strong lensing they can differ from the body's
-apparent image, and off-screen handles remain editable through the panel.
+yellow center to translate in the view plane. The gizmo origin is anchored to the
+largest visible image of the selected body using the renderer's first-sample body
+IDs, including observer aberration and gravitational lensing. With multiple lensed
+images, the largest connected image is used. Arrows remain world-axis editing
+directions, not bent light rays. Invisible bodies have no gizmo but remain editable
+through the panel. Anchors update only when a complete new view is displayed.
 Left-drag elsewhere still rotates the camera. F1 hides the panels and gizmo.
 Moving the black hole also moves its accretion disk and gravity field. Other bodies
 move independently. Scene edits restart progressive rendering without reloading textures.

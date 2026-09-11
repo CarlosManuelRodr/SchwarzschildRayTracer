@@ -747,6 +747,38 @@ int runGpuTests(const std::filesystem::path& assets)
     waitFor(gpu);
     require(gpu.pickDisplayed(0.5, 0.5) == 0, "Reset body position must restore picking");
 
+    auto lensedScene = editedScene;
+    lensedScene.spheres[0].centerRadius = {3, 0, 0, 0.65f};
+    lensedScene.materials.push_back({{Schwarzschild, 0, 0, 0}, {}});
+    lensedScene.spheres.push_back({{0, 0, 0, 5.5f}, {1, 0, 0, 0}});
+    auto lensedCamera = editCamera;
+    lensedCamera.position = {0, 0, 6};
+    auto lensedSettings = editSettings;
+    lensedSettings.width = 128;
+    lensedSettings.height = 96;
+    lensedSettings.integrationMode = RenderSettings::FullScene;
+    gpu.uploadScene(lensedScene);
+    for (auto observer : {RenderSettings::Hovering, RenderSettings::FreelyFalling})
+    {
+        lensedSettings.observerType = observer;
+        lensedSettings.observerVelocity =
+            observer == RenderSettings::FreelyFalling ? Vec3(0.2, 0.1, 0) : Vec3(0);
+        gpu.reset(lensedSettings, lensedCamera);
+        waitFor(gpu);
+        auto anchor = gpu.bodyAnchors()[0];
+        require(anchor.z == 1 && gpu.pickDisplayed(anchor.x, anchor.y) == 0,
+                "Gizmo anchor must lie on the lensed body in either observer frame");
+        auto retained = anchor;
+        lensedCamera.position.y += 0.1;
+        gpu.reset(lensedSettings, lensedCamera);
+        require(distance(gpu.bodyAnchors()[0], retained) == 0,
+                "Pending views must retain the displayed gizmo anchor");
+        waitFor(gpu);
+    }
+    gpu.uploadScene(editedScene);
+    gpu.reset(editSettings, editCamera);
+    waitFor(gpu);
+
     // Exercise a real ImGui frame and synthetic SDL handle drag in a hidden window.
     auto window = SDL_GL_GetCurrentWindow();
     checkSdl(SDL_SetWindowSize(window, 1200, 800), "Size editor test window");

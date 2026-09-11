@@ -22,6 +22,7 @@ class GpuRenderer
     void uploadScene(const SceneData& scene);
     void updateGeometry(const SceneData& scene);
     int pickDisplayed(double u, double v) const;
+    const std::vector<Vec3>& bodyAnchors() const;
     void reset(const RenderSettings& settings, const CameraData& camera);
     std::array<int, 2> fitResolution(int width, int height) const;
     bool dispatch(); // Nonblocking; at most one bounded batch in flight.

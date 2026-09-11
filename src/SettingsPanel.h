@@ -37,9 +37,31 @@ class SettingsPanel
                       const SceneData& scene);
     void render();
     void selectBody(int body);
-    int selectedBodyIndex() const { return selectedBody; }
-    bool isVisible() const { return visible; }
-    void setEditingEnabled(bool enabled) { editingEnabled=enabled; if (!enabled) { dragAxis=-1; bodyEditPending=false; } }
+
+    void setBodyAnchors(const std::vector<Vec3>& anchors)
+    {
+        bodyAnchors = anchors;
+    }
+
+    int selectedBodyIndex() const
+    {
+        return selectedBody;
+    }
+
+    bool isVisible() const
+    {
+        return visible;
+    }
+
+    void setEditingEnabled(bool enabled)
+    {
+        editingEnabled = enabled;
+        if (!enabled)
+        {
+            dragAxis = -1;
+            bodyEditPending = false;
+        }
+    }
 
     bool manipulatingBody() const
     {
@@ -62,6 +84,7 @@ class SettingsPanel
   private:
     void drawBodyEditor(PanelActions&, const CameraData&, const SceneData&, double aspect);
     void processGizmoEvent(const SDL_Event&);
+    std::vector<Vec3> bodyAnchors;
     int selectedBody = -1;
     int dragAxis = -1; // XYZ or 3 for translation in the view plane.
     bool editorOpen = false, gizmoVisible = false, bodyEditPending = false;

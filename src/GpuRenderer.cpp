@@ -119,6 +119,9 @@ struct GpuRenderer::Impl
     GLuint display = 0;
     GLuint vao = 0;
     GLuint texture = 0;
+    GLuint bodyIdTexture = 0;
+    bool anchorsPublished = false;
+    std::vector<Vec3> anchors;
     GLuint displayedTexture = 0;
     RenderSettings displayedSettings;
     CameraData camera, displayedCamera;
@@ -151,6 +154,7 @@ struct GpuRenderer::Impl
         glDeleteQueries(1, &query);
         glDeleteBuffers(8, buffers);
         glDeleteTextures(1, &texture);
+        glDeleteTextures(1, &bodyIdTexture);
         glDeleteTextures(1, &displayedTexture);
         glDeleteVertexArrays(1, &vao);
 
@@ -321,6 +325,11 @@ int GpuRenderer::pickDisplayed(double u, double v) const
     return pickBody(g.displayedGeometry, g.displayedSettings, g.displayedCamera, u, v);
 }
 
+const std::vector<Vec3>& GpuRenderer::bodyAnchors() const
+{
+    return impl->anchors;
+}
+
 void GpuRenderer::reset(const RenderSettings& settings, const CameraData& camera)
 {
     settings.validate();
@@ -357,6 +366,15 @@ void GpuRenderer::reset(const RenderSettings& settings, const CameraData& camera
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindImageTexture(0, g.texture, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
+
+    glDeleteTextures(1, &g.bodyIdTexture);
+    glGenTextures(1, &g.bodyIdTexture);
+    glBindTexture(GL_TEXTURE_2D, g.bodyIdTexture);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32I, settings.width, settings.height);
+    glBindImageTexture(1, g.bodyIdTexture, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R32I);
+    g.anchorsPublished = false;
+    if (g.anchors.empty())
+        g.anchors.resize(g.observerGeometry.spheres.size());
 
     g.settings = settings;
     g.camera = camera;
@@ -456,6 +474,62 @@ bool GpuRenderer::poll()
                            g.settings.width,
                            g.settings.height,
                            1);
+        if (!g.anchorsPublished)
+        {
+            // Use the largest connected image of each body. A nearest member
+            // pixel keeps the handle on the body even for rings and crescents.
+            int width = g.settings.width, height = g.settings.height;
+            std::vector<int> ids(std::size_t(width) * height);
+            glBindTexture(GL_TEXTURE_2D, g.bodyIdTexture);
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RED_INTEGER, GL_INT, ids.data());
+            g.anchors.assign(g.observerGeometry.spheres.size(), Vec3(0));
+            std::vector<std::size_t> largest(g.anchors.size(), 0);
+            std::vector<int> component;
+            for (int start = 0; start < int(ids.size()); ++start)
+            {
+                int body = ids[start];
+                if (body < 0 || body >= int(g.anchors.size()))
+                    continue;
+                component.clear();
+                component.push_back(start);
+                ids[start] = -1;
+                double sx = 0, sy = 0;
+                for (std::size_t head = 0; head < component.size(); ++head)
+                {
+                    int pixel = component[head], x = pixel % width, y = pixel / width;
+                    sx += x;
+                    sy += y;
+                    int adjacent[] = {x > 0 ? pixel - 1 : -1,
+                                      x + 1 < width ? pixel + 1 : -1,
+                                      y > 0 ? pixel - width : -1,
+                                      y + 1 < height ? pixel + width : -1};
+                    for (int next : adjacent)
+                        if (next >= 0 && ids[next] == body)
+                        {
+                            ids[next] = -1;
+                            component.push_back(next);
+                        }
+                }
+                if (component.size() <= largest[body])
+                    continue;
+                largest[body] = component.size();
+                sx /= component.size();
+                sy /= component.size();
+                int nearest = component[0];
+                double best = 1e30;
+                for (int pixel : component)
+                {
+                    double dx = pixel % width - sx, dy = pixel / width - sy;
+                    if (dx * dx + dy * dy < best)
+                    {
+                        best = dx * dx + dy * dy;
+                        nearest = pixel;
+                    }
+                }
+                g.anchors[body] = {(nearest % width + 0.5) / width, (nearest / width + 0.5) / height, 1};
+            }
+            g.anchorsPublished = true;
+        }
         g.displayedSettings = g.settings;
         g.displayedCamera = g.camera;
         g.displayedGeometry = g.observerGeometry;

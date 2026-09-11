@@ -136,7 +136,13 @@ void SettingsPanel::drawBodyEditor(PanelActions& actions,
         bodyEditPending = false;
     }
     auto display = ImGui::GetIO().DisplaySize;
-    ImGui::SetNextWindowPos(ImVec2(12, std::max(12.0f, display.y - (6*ImGui::GetFrameHeightWithSpacing()+6*(ImGui::GetFrameHeight()+6)+52) - 250 * uiScale)), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(12,
+                                   std::max(12.0f,
+                                            display.y -
+                                                (6 * ImGui::GetFrameHeightWithSpacing() +
+                                                 6 * (ImGui::GetFrameHeight() + 6) + 52) -
+                                                250 * uiScale)),
+                            ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(350 * uiScale, 225 * uiScale), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Body transform", &editorOpen))
     {
@@ -185,25 +191,39 @@ void SettingsPanel::drawBodyEditor(PanelActions& actions,
     auto selected = scene.spheres[selectedBody].centerRadius;
     displayedBodyPosition =
         actions.body == selectedBody ? actions.bodyPosition : Vec3(selected.x, selected.y, selected.z);
-    // Editor handles use geometric projection, independently of the lensed image.
+    bool anchored = selectedBody < int(bodyAnchors.size());
+    if (anchored && bodyAnchors[selectedBody].z == 0)
+        return;
+    // World axes remain editing directions; their origin follows the rendered image.
     auto basis = camera.basis(aspect);
     gizmoRight = normalized(basis[2]);
     gizmoUp = normalized(basis[3]);
     Vec3 forward = normalized(camera.lookAt - camera.position);
     double tanHalf = std::tan(camera.verticalFov * 3.141592653589793 / 360);
     double depth = dot(displayedBodyPosition - camera.position, forward);
-    if (depth <= 1e-4 || display.x <= 0 || display.y <= 0)
+    if ((!anchored && depth <= 1e-4) || display.x <= 0 || display.y <= 0)
         return;
+    Vec3 projectionOrigin = displayedBodyPosition;
+    if (anchored && depth <= 1e-4)
+    {
+        depth = std::max(
+            1.0,
+            std::sqrt(dot(displayedBodyPosition - camera.position, displayedBodyPosition - camera.position)));
+        projectionOrigin = camera.position + depth * forward;
+    }
     auto project = [&](Vec3 point)
     {
-        Vec3 offset = point - camera.position;
+        Vec3 offset = point - displayedBodyPosition + projectionOrigin - camera.position;
         double z = dot(offset, forward);
         if (z <= 1e-4)
             return SDL_FPoint{-100000, -100000};
         return SDL_FPoint{float(display.x * (0.5 + dot(offset, gizmoRight) / (2 * z * tanHalf * aspect))),
                           float(display.y * (0.5 - dot(offset, gizmoUp) / (2 * z * tanHalf)))};
     };
-    gizmoOrigin = project(displayedBodyPosition);
+    SDL_FPoint geometricOrigin = project(displayedBodyPosition);
+    gizmoOrigin = anchored ? SDL_FPoint{float(bodyAnchors[selectedBody].x * display.x),
+                                        float((1 - bodyAnchors[selectedBody].y) * display.y)}
+                           : geometricOrigin;
     if (gizmoOrigin.x < 0 || gizmoOrigin.x > display.x || gizmoOrigin.y < 0 || gizmoOrigin.y > display.y)
         return;
     gizmoPixelScale = 2 * depth * tanHalf / display.y;
@@ -216,6 +236,8 @@ void SettingsPanel::drawBodyEditor(PanelActions& actions,
     for (int i = 0; i < 3; ++i)
     {
         gizmoEnds[i] = project(displayedBodyPosition + gizmoLength * axes[i]);
+        gizmoEnds[i].x += gizmoOrigin.x - geometricOrigin.x;
+        gizmoEnds[i].y += gizmoOrigin.y - geometricOrigin.y;
         ImVec2 end{gizmoEnds[i].x, gizmoEnds[i].y};
         float dx = end.x - start.x, dy = end.y - start.y, length = std::hypot(dx, dy);
         if (length < 10)

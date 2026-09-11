@@ -215,8 +215,10 @@ int main(int argc, char** argv)
         if (mode == "--test-cpu")
             return rt::runCpuTests();
 
-        if (mode == "--test-animation") return rt::runAnimationTests();
-        if (mode == "--test-export") return rt::runExportTests(executableDirectory() / "Output");
+        if (mode == "--test-animation")
+            return rt::runAnimationTests();
+        if (mode == "--test-export")
+            return rt::runExportTests(executableDirectory() / "Output");
         rt::SdlVideo video;
         if (mode == "--test-export-gpu")
         {
@@ -450,6 +452,7 @@ int main(int argc, char** argv)
                 continue;
             }
 
+            panel.setBodyAnchors(renderer.bodyAnchors());
             panel.beginFrame();
             auto actions =
                 panel.draw(slowMovementStep, renderer.progress(), activeSettings, preview, camera, scene);
@@ -530,8 +533,13 @@ int main(int argc, char** argv)
 
             renderer.poll();
             bool wasBusy = timeline.busy();
-            bool animated = timeline.update(scene, camera, renderer, settings, activeSettings,
-                                            dragging || panel.manipulatingBody() || ImGui::IsAnyItemActive() || reset);
+            bool animated =
+                timeline.update(scene,
+                                camera,
+                                renderer,
+                                settings,
+                                activeSettings,
+                                dragging || panel.manipulatingBody() || ImGui::IsAnyItemActive() || reset);
             if (animated)
             {
                 geometryDirty = true;
