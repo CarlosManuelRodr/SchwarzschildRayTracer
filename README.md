@@ -1,5 +1,13 @@
 # SchwarzschildRayTracer
 
+## Texture credits
+
+The realistic Earth textures (day, night, clouds, normal and specular maps) and
+Sun texture were created by [Solar System Scope](https://www.solarsystemscope.com/textures/)
+and are licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
+The TIFF data maps were converted to lossless PNG runtime copies with identical
+RGB pixels for use in this app.
+
 ## Updated scene assets
 
 The black hole is at `(0, 0, 0)`. Earth remains 7 scene units from it; the Sun's
