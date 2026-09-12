@@ -817,11 +817,12 @@ int runGpuTests(const std::filesystem::path& assets)
             panel.render();
         }
         auto viewport = panel.viewport();
-        require(viewport.x > 0 && viewport.y > 0 && viewport.width > 0 && viewport.width < 1200,
-                "Docking must reserve a separate scene viewport");
-        require(ImGui::FindWindowByName("Render Settings")->DockId != 0 &&
-                    !ImGui::FindWindowByName("Render Settings")->HasCloseButton,
-                "Render settings must be docked without a close button");
+        require(viewport.x > 0 && viewport.y > 0 && viewport.width > 0 && panel.viewportArea().width > 1190,
+                "Default workspace must give the viewport the full available width");
+        require(!ImGui::FindWindowByName("Render Settings") && !panel.timelineVisible(),
+                "Optional panels must be hidden in a fresh workspace");
+        require(!ImGui::FindWindowByName("Viewport")->HasCloseButton,
+                "Viewport must not have a close button");
         float handleX = viewport.x + viewport.width / 2 + 40 * ImGui::GetStyle().FontScaleDpi;
         float handleY = viewport.y + viewport.height / 2;
         ImGui::GetIO().AddMousePosEvent(handleX, handleY);
@@ -880,7 +881,7 @@ int runGpuTests(const std::filesystem::path& assets)
         timelineFrame();
         require(panel.selectedBodyIndex() == -1,
                 "Escape must clear selection through the animation controller");
-        auto dock = ImGui::FindWindowByName("Render Settings")->DockId;
+        auto dock = ImGui::FindWindowByName("Viewport")->DockId;
         SDL_Event toggle{};
         toggle.type = SDL_EVENT_KEY_DOWN;
         toggle.key.key = SDLK_F1;
@@ -891,7 +892,7 @@ int runGpuTests(const std::filesystem::path& assets)
         panel.processEvent(toggle);
         timelineFrame();
         timelineFrame();
-        require(panel.isVisible() && ImGui::FindWindowByName("Render Settings")->DockId == dock,
+        require(panel.isVisible() && ImGui::FindWindowByName("Viewport")->DockId == dock,
                 "F1 must restore the dock layout");
         require(ImGui::GetIO().IniFilename == nullptr,
                 "Hidden validation must not modify workspace preferences");

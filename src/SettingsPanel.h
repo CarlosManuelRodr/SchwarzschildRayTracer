@@ -131,7 +131,7 @@ class SettingsPanel
     }
 
     void syncResolution(int width, int height);
-    void setStatus(const std::string& message, bool error = false);
+    void setStatus(const std::string& message, bool error = false, bool untilRenderFinished = false);
 
     const RenderSettings& requestedSettings() const
     {
@@ -170,11 +170,10 @@ class SettingsPanel
     bool visible = true;
     bool matchWindow = true;
     std::string status;
-    bool statusError = false;
+    bool statusError = false, statusUntilRenderFinished = false;
     bool editingEnabled = true;
     SDL_Window* window = nullptr;
-    bool panels[6] = {
-        true, true, true, true, true, true}; // Scene, Inspector, Camera, Render, Timeline, Viewport
+    bool panels[5] = {}; // Optional: Scene, Inspector, Camera, Render, Timeline
     bool lockedLayout = true, resetLayout = false, showGizmos = true;
     bool controlsOpen = false, aboutOpen = false, canUndo = false, canRedo = false;
     bool viewportHovered = false, viewportFocused = false, saveRequested = false;

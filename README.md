@@ -2,17 +2,21 @@
 
 ## Workspace
 
-The docked workspace places **Scene** on the left, **Viewport** in the center,
-**Inspector / Camera / Render Settings** tabs on the right, and **Timeline** below.
-Resize areas with the splitters. **View > Lock Layout** controls undocking;
-**View > Reset Layout** restores the starting arrangement. Layout, panel visibility,
-and gizmo visibility are saved between sessions.
+A fresh workspace shows only the **Viewport**, with the menu and status bars.
+Open optional panels from **View**: Scene docks left, Inspector / Camera / Render
+Settings dock right, and Timeline docks below. The viewport is always visible and
+cannot be hidden or undocked. Resize areas with the splitters.
+**View > Lock Layout** controls undocking of optional panels; **View > Reset Layout**
+returns to the viewport-only default. Existing saved layouts and panel choices
+are preserved between sessions, so use Reset Layout to try the new default.
+The status bar shows camera distance to the black-hole center and horizon radius
+on the right. Temporary render-update text clears when rendering finishes.
 
 - **File > Save Image...** (P) captures the displayed image and opens a native PNG
   save dialog. **File > Export Animation...** opens video/sequence settings.
 - **Edit** offers animation undo/redo and deselection. Escape stops playback,
   cancels an active export, or deselects; use **File > Exit** to close the app.
-- **View** toggles each panel and gizmos. F1 temporarily hides the interface,
+- **View** toggles optional panels and gizmos. F1 temporarily hides the interface,
   preserving the chosen panels and layout when restored.
 - **Help > Controls and Shortcuts** explains navigation and keyframing.
 

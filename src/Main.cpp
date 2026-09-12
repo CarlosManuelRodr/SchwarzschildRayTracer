@@ -665,7 +665,7 @@ int main(int argc, char** argv)
                     renderer.reset(activeSettings, camera);
                     cameraPending = false;
                     renderSettingsPending = false;
-                    panel.setStatus("Rendering updated settings.");
+                    panel.setStatus("Rendering updated settings.", false, true);
                 }
 
                 // Finish each preview even if newer input arrives. Otherwise a held

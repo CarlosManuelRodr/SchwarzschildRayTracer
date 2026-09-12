@@ -7,13 +7,14 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <cstdio>
 #include <stdexcept>
 
 namespace rt
 {
 namespace
 {
-const char* panelNames[] = {"Scene", "Inspector", "Camera", "Render Settings", "Timeline", "Viewport"};
+const char* panelNames[] = {"Scene", "Inspector", "Camera", "Render Settings", "Timeline"};
 
 const char* nameOf(const SceneData& scene, int body)
 {
@@ -54,10 +55,16 @@ SettingsPanel::SettingsPanel(SDL_Window* owner, const RenderSettings& settings)
             std::ifstream input(std::filesystem::u8path(preferencesFile));
             int version = 0;
             input >> version;
-            if (version == 1)
+            if (version == 1 || version == 2)
             {
                 for (bool& panel : panels)
                     input >> panel;
+                // Version 1 also stored a viewport visibility flag; it is now always visible.
+                if (version == 1)
+                {
+                    bool oldViewport;
+                    input >> oldViewport;
+                }
                 input >> lockedLayout >> showGizmos;
             }
         }
@@ -130,7 +137,7 @@ void SettingsPanel::saveWorkspace()
     if (preferencesFile.empty())
         return;
     std::ofstream output(std::filesystem::u8path(preferencesFile));
-    output << "1\n";
+    output << "2\n";
     for (bool panel : panels)
         output << panel << ' ';
     output << lockedLayout << ' ' << showGizmos << '\n';
@@ -232,7 +239,7 @@ void SettingsPanel::drawWorkspace(PanelActions& actions)
         }
         if (ImGui::BeginMenu("View"))
         {
-            for (int i = 0; i < 6; ++i)
+            for (int i = 0; i < 5; ++i)
                 ImGui::MenuItem(panelNames[i], nullptr, &panels[i]);
             ImGui::Separator();
             ImGui::MenuItem("Show Gizmos", nullptr, &showGizmos);
@@ -244,7 +251,7 @@ void SettingsPanel::drawWorkspace(PanelActions& actions)
             {
                 resetLayout = true;
                 for (bool& p : panels)
-                    p = true;
+                    p = false;
             }
             ImGui::EndMenu();
         }
@@ -300,7 +307,11 @@ void SettingsPanel::drawWorkspace(PanelActions& actions)
     ImGui::PopStyleVar(2);
     if (visible && controlsOpen)
     {
-        ImGui::Begin("Controls and Shortcuts", &controlsOpen);
+        ImGui::SetNextWindowSize({460 * uiScale, 430 * uiScale}, ImGuiCond_Appearing);
+        ImGui::Begin("Controls and Shortcuts",
+                     &controlsOpen,
+                     ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings);
+        ImGui::PushTextWrapPos(0);
         ImGui::TextUnformatted("Compose\n  Click a body or Scene row to select.\n  Drag the XYZ arrows or "
                                "center to move it.\n  Click empty space or press Esc to deselect.");
         ImGui::Separator();
@@ -318,11 +329,13 @@ void SettingsPanel::drawWorkspace(PanelActions& actions)
                            "falling from rest at infinity. Combined observer speed stays below light speed.");
         ImGui::TextWrapped("Animation data is session-only. Closing the app loses keyframes. Workspace "
                            "layout is saved separately.");
+        ImGui::PopTextWrapPos();
         ImGui::End();
     }
     if (visible && aboutOpen)
     {
-        ImGui::Begin("About", &aboutOpen);
+        ImGui::SetNextWindowSize({340 * uiScale, 300 * uiScale}, ImGuiCond_Appearing);
+        ImGui::Begin("About", &aboutOpen, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings);
         ImGui::TextUnformatted("Schwarzschild Ray Tracer");
         ImGui::TextWrapped("An interactive black-hole scene and keyframe animation editor. See README for "
                            "the physical model, limitations and texture credits.");
@@ -515,15 +528,20 @@ void SettingsPanel::drawViewport(const PanelActions& actions,
     gizmoVisible = false;
     contentRect = {};
     imageRect = {};
-    if (visible && !panels[5])
-        return;
+
     if (!visible)
     {
         ImGui::SetNextWindowPos({0, 0});
         ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
     }
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0, 0});
-    int flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+    int flags =
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse;
+    ImGui::SetNextWindowCollapsed(false);
+    ImGuiWindowClass viewportClass;
+    viewportClass.DockNodeFlagsOverrideSet =
+        ImGuiDockNodeFlags_NoDockingOverMe | ImGuiDockNodeFlags_NoUndocking;
+    ImGui::SetNextWindowClass(&viewportClass);
     if (lockedLayout)
         flags |= ImGuiWindowFlags_NoMove;
     if (!visible)
@@ -612,6 +630,30 @@ PanelActions SettingsPanel::draw(double& slowStep,
                      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                          ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
                          ImGuiWindowFlags_NoScrollbar);
+        if (statusUntilRenderFinished && progress.finished && !preview)
+        {
+            status.clear();
+            statusUntilRenderFinished = false;
+        }
+        char location[160]{};
+        for (const auto& sphere : scene.spheres)
+            if (scene.materials[sphere.material.x].kindTexture.x == Schwarzschild)
+            {
+                Vec3 offset = camera.position -
+                              Vec3(sphere.centerRadius.x, sphere.centerRadius.y, sphere.centerRadius.z);
+                std::snprintf(location,
+                              sizeof(location),
+                              "BH center distance: %.5g  |  Horizon radius: 1",
+                              std::sqrt(dot(offset, offset)));
+                break;
+            }
+        auto start = ImGui::GetCursorScreenPos();
+        float right = start.x + ImGui::GetContentRegionAvail().x;
+        float locationX = std::max(start.x, right - ImGui::CalcTextSize(location).x);
+        auto* draw = ImGui::GetWindowDrawList();
+        // Reserve the right side even when a long filename is reported on the left.
+        draw->PushClipRect(
+            start, {std::max(start.x, locationX - 16 * uiScale), start.y + ImGui::GetTextLineHeight()}, true);
         ImGui::TextDisabled("%s  |  %d x %d  |  %.1f / %d samples",
                             preview             ? "Preview"
                             : progress.finished ? "Ready"
@@ -632,6 +674,10 @@ PanelActions SettingsPanel::draw(double& slowStep,
                                status.c_str());
             tip(status.c_str());
         }
+        draw->PopClipRect();
+        ImGui::SetCursorScreenPos({locationX, start.y});
+        ImGui::TextDisabled("%s", location);
+        tip("Camera distance from the black-hole center and event horizon radius, in scene units.");
         ImGui::End();
         ImGui::PopStyleVar();
     }
@@ -660,9 +706,10 @@ void SettingsPanel::syncResolution(int width, int height)
     }
 }
 
-void SettingsPanel::setStatus(const std::string& text, bool error)
+void SettingsPanel::setStatus(const std::string& text, bool error, bool untilRenderFinished)
 {
     status = text;
     statusError = error;
+    statusUntilRenderFinished = untilRenderFinished;
 }
 } // namespace rt
