@@ -1,11 +1,7 @@
 #include "RandomGen.h"
 #include <chrono>
 
-/****************************
-*                           *
-*  Generador de aleatorios  *
-*                           *
-****************************/
+// Random number generation.
 
 RandomAlgorithm RandomGen::m_ra = RandomAlgorithm::MT19937;
 std::mt19937 RandomGen::mt;
@@ -16,6 +12,7 @@ void RandomGen::SetAlgorithm(RandomAlgorithm ra)
 {
     m_ra = ra;
 }
+
 void RandomGen::Seed(int seed)
 {
     if (seed == -1)
@@ -37,6 +34,7 @@ void RandomGen::Seed(int seed)
         break;
     };
 }
+
 int RandomGen::GetInt(int i)
 {
     switch (m_ra)
@@ -54,8 +52,10 @@ int RandomGen::GetInt(int i)
         return rl48() % i;
         break;
     };
+
     return 0;
 }
+
 float RandomGen::Getfloat()
 {
     switch (m_ra)
@@ -73,5 +73,6 @@ float RandomGen::Getfloat()
         return (float)rl48() / (float)rl48.max();
         break;
     };
+
     return 0.0;
 }

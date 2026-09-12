@@ -1,13 +1,19 @@
+/**
+ * @file
+ * @brief Historical CPU teaching implementation, retained for reference.
+ *
+ * The current application uses rt::SceneData and the shared TraceCore.inl kernel.
+ */
 #pragma once
 #include "Hitable.h"
 
 /**
-* @brief Función auxiliar para calcular las coordenadas UV de la esfera en el punto de colisión.
-* @param p Posición de la colisión
-* @param u Variable donde se almacena la coordenada U
-* @param v Variable donde se almacena la coordenada V
-*/
-void get_sphere_uv(const Vector3& p, float& u, float& v)
+ * @brief Convert a unit sphere normal into equirectangular texture coordinates.
+ * @param p Unit vector from the sphere center to the intersection.
+ * @param u Output horizontal coordinate in [0,1].
+ * @param v Output vertical coordinate in [0,1].
+ */
+void get_sphere_uv(const Vector3 &p, float &u, float &v)
 {
     auto phi = atan2(p.z(), p.x());
     auto theta = asin(p.y());
@@ -17,7 +23,7 @@ void get_sphere_uv(const Vector3& p, float& u, float& v)
 
 /**
  * @class Sphere
- * @brief Objeto colisionable esférico.
+ * @brief Sphere geometry with a borrowed material pointer.
  */
 class Sphere : public Hitable
 {
@@ -27,34 +33,26 @@ public:
     Material* matPtr;
 
     Sphere(Vector3 cen, float r, Material* m) : center(cen), radius(r), matPtr(m) {};
-    virtual bool Hit(const Ray& r, float tMin, float tMax, HitRecord& rec) const;
+
+    /** @brief Return the nearest strict-interval intersection; tangencies are excluded in this legacy code.
+     */
+    virtual bool Hit(const Ray &r, float tMin, float tMax, HitRecord &rec) const;
 };
 
-bool Sphere::Hit(const Ray& r, float tMin, float tMax, HitRecord& rec) const
+bool Sphere::Hit(const Ray &r, float tMin, float tMax, HitRecord &rec) const
 {
-    // Calcula la intersección del rayo con la esfera.
+    // Solve the quadratic for the ray-sphere intersection.
     Vector3 oc = r.Origin() - center;
     float a = dot(r.Direction(), r.Direction());
     float b = dot(oc, r.Direction());
     float c = dot(oc, oc) - radius * radius;
-    float discriminant = b*b - a*c;
+    float discriminant = b * b - a * c;
 
-    // Si el discriminante es > 0 existe una intersección.
+    // A positive discriminant gives two roots; this legacy test excludes tangencies.
     if (discriminant > 0)
     {
-        float temp = (-b - sqrt(b*b - a*c)) / a;
-        if (temp < tMax && temp > tMin)
-        {
-            rec.t = temp;
-            rec.p = r.PointAtParameter(rec.t);
-            rec.normal = (rec.p - center) / radius;
-            rec.matPtr = matPtr;
-            rec.object = (Hittable*) this;
-            get_sphere_uv((rec.p - center) / radius, rec.u, rec.v);
-            return true;
-        }
+        float temp = (-b - sqrt(b * b - a * c)) / a;
 
-        temp = (-b + sqrt(b*b - a*c)) / a;
         if (temp < tMax && temp > tMin)
         {
             rec.t = temp;
@@ -63,8 +61,24 @@ bool Sphere::Hit(const Ray& r, float tMin, float tMax, HitRecord& rec) const
             rec.matPtr = matPtr;
             rec.object = (Hittable*)this;
             get_sphere_uv((rec.p - center) / radius, rec.u, rec.v);
+
+            return true;
+        }
+
+        temp = (-b + sqrt(b * b - a * c)) / a;
+
+        if (temp < tMax && temp > tMin)
+        {
+            rec.t = temp;
+            rec.p = r.PointAtParameter(rec.t);
+            rec.normal = (rec.p - center) / radius;
+            rec.matPtr = matPtr;
+            rec.object = (Hittable*)this;
+            get_sphere_uv((rec.p - center) / radius, rec.u, rec.v);
+
             return true;
         }
     }
+
     return false;
 }

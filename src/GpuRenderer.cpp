@@ -10,16 +10,17 @@ namespace rt
 {
     namespace
     {
-        std::string readText(const std::filesystem::path& path)
+        std::string readText(const std::filesystem::path &path)
         {
             std::ifstream f(path);
+
             if (!f)
                 throw std::runtime_error("Cannot read shader: " + path.string());
 
             return {std::istreambuf_iterator(f), std::istreambuf_iterator<char>()};
         }
 
-        GLuint compile(GLenum kind, const std::string& source)
+        GLuint compile(GLenum kind, const std::string &source)
         {
             const GLuint shader = glCreateShader(kind);
             const char* data = source.c_str();
@@ -42,14 +43,14 @@ namespace rt
             return shader;
         }
 
-        GLuint program(const std::vector<std::pair<GLenum, std::string>>& sources)
+        GLuint program(const std::vector<std::pair<GLenum, std::string>> &sources)
         {
             const GLuint p = glCreateProgram();
             std::vector<GLuint> shaders;
 
             try
             {
-                for (const auto&[fst, snd] : sources)
+                for (const auto &[fst, snd] : sources)
                 {
                     auto shader = compile(fst, snd);
                     shaders.push_back(shader);
@@ -107,9 +108,9 @@ namespace rt
         };
 
         static_assert(sizeof(StoredState) == 112 && sizeof(SphereData) == 32 && sizeof(MaterialData) == 48 &&
-                      sizeof(TextureData) == 48,
+                          sizeof(TextureData) == 48,
                       "GPU storage layout mismatch");
-    }
+    } // namespace
 
     struct GpuRenderer::Impl
     {
@@ -172,7 +173,8 @@ namespace rt
             if (!fence)
                 return;
 
-            if (const GLenum result = glClientWaitSync(fence, GL_SYNC_FLUSH_COMMANDS_BIT, GL_TIMEOUT_IGNORED); result == GL_WAIT_FAILED)
+            if (const GLenum result = glClientWaitSync(fence, GL_SYNC_FLUSH_COMMANDS_BIT, GL_TIMEOUT_IGNORED);
+                result == GL_WAIT_FAILED)
                 throw std::runtime_error("GPU wait failed");
         }
 
@@ -184,7 +186,8 @@ namespace rt
                     "for scene textures, use smaller texture assets.");
 
             glBindBuffer(GL_SHADER_STORAGE_BUFFER, buffers[binding]);
-            glBufferData(GL_SHADER_STORAGE_BUFFER, GLsizeiptr(std::max<std::size_t>(bytes, 16)), data, GL_DYNAMIC_DRAW);
+            glBufferData(GL_SHADER_STORAGE_BUFFER, GLsizeiptr(std::max<std::size_t>(bytes, 16)), data,
+                         GL_DYNAMIC_DRAW);
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, GLuint(binding), buffers[binding]);
         }
 
@@ -194,18 +197,21 @@ namespace rt
         }
     };
 
-    GpuRenderer::GpuRenderer(const std::filesystem::path& assets) : impl(new Impl)
+    GpuRenderer::GpuRenderer(const std::filesystem::path &assets) : impl(new Impl)
     {
         glewExperimental = GL_TRUE;
 
         if (const auto error = glewInit(); error != GLEW_OK)
             throw std::runtime_error("GLEW initialization failed");
 
-        while (glGetError() != GL_NO_ERROR) {} // GLEW may probe compatibility-only extensions.
+        while (glGetError() != GL_NO_ERROR)
+        {
+        } // GLEW may probe compatibility-only extensions.
         if (!GLEW_VERSION_4_3)
-            throw std::runtime_error("OpenGL 4.3 compute shaders are required. Update the GPU driver or select a supported GPU.");
+            throw std::runtime_error(
+                "OpenGL 4.3 compute shaders are required. Update the GPU driver or select a supported GPU.");
 
-        auto& g = *impl;
+        auto &g = *impl;
         g.apiReady = true;
         g.deviceName = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
         glGetInteger64v(GL_MAX_SHADER_STORAGE_BLOCK_SIZE, &g.maxStorage);
@@ -216,13 +222,14 @@ namespace rt
         if (marker == std::string::npos)
             throw std::runtime_error("Missing trace shader include marker");
 
-        source.replace(marker, std::string("// TRACE_CORE").size(), readText(assets / "shaders" / "TraceCore.inl"));
+        source.replace(marker, std::string("// TRACE_CORE").size(),
+                       readText(assets / "shaders" / "TraceCore.inl"));
         const auto lightingMarker = source.find("#include \"LightingCore.inl\"");
+
         if (lightingMarker == std::string::npos)
             throw std::runtime_error("Missing lighting shader include marker");
 
-        source.replace(lightingMarker,
-                       std::string("#include \"LightingCore.inl\"").size(),
+        source.replace(lightingMarker, std::string("#include \"LightingCore.inl\"").size(),
                        readText(assets / "shaders" / "LightingCore.inl"));
         g.trace = program({{GL_COMPUTE_SHADER, source}});
         g.display = program({{GL_VERTEX_SHADER, readText(assets / "shaders" / "fullscreen.vert")},
@@ -240,24 +247,28 @@ namespace rt
     {
         if (width <= 0 || height <= 0)
             throw std::runtime_error("Window dimensions must be positive");
+
         GLint textureLimit = 0;
         glGetIntegerv(GL_MAX_TEXTURE_SIZE, &textureLimit);
 
         // Keep interactive state below both the driver block limit and 256 MiB.
-        const double maxPixels = static_cast<double>(std::min<GLint64>(impl->maxStorage, 256ll * 1024 * 1024)) / sizeof(StoredState);
+        const double maxPixels =
+            static_cast<double>(std::min<GLint64>(impl->maxStorage, 256ll * 1024 * 1024)) /
+            sizeof(StoredState);
         const double sideLimit = std::min(textureLimit, 8192);
         const double scale = std::min(
             {1.0, sideLimit / width, sideLimit / height, std::sqrt(maxPixels / (double(width) * height))});
-        return {std::max(1, static_cast<int>(std::floor(width * scale))), std::max(1, int(std::floor(height * scale)))};
+        return {std::max(1, static_cast<int>(std::floor(width * scale))),
+                std::max(1, int(std::floor(height * scale)))};
     }
 
-    void GpuRenderer::uploadScene(const SceneData& scene)
+    void GpuRenderer::uploadScene(const SceneData &scene)
     {
         impl->observerGeometry.spheres = scene.spheres;
         impl->observerGeometry.materials = scene.materials;
         impl->observerGeometry.disk = scene.disk;
         scene.validate();
-        auto& g = *impl;
+        auto &g = *impl;
         g.wait();
         poll();
         g.buffer(0, scene.spheres.data(), scene.spheres.size() * sizeof(SphereData));
@@ -265,7 +276,7 @@ namespace rt
         g.buffer(2, scene.textures.data(), scene.textures.size() * sizeof(TextureData));
 
         auto texels = scene.texels;
-        const auto& thermal = blackbodyTable();
+        const auto &thermal = blackbodyTable();
         texels.insert(texels.end(), thermal.begin(), thermal.end());
         g.buffer(3, texels.data(), texels.size() * sizeof(Float4));
 
@@ -274,9 +285,11 @@ namespace rt
         glUseProgram(g.trace);
         int hole = -1;
         int earth = -1;
+
         for (int i = 0; i < int(scene.spheres.size()); ++i)
         {
             const int kind = scene.materials[scene.spheres[i].material.x].kindTexture.x;
+
             if (kind == Schwarzschild)
                 hole = i;
             if (kind == Earth)
@@ -288,22 +301,22 @@ namespace rt
         g.integer("thermalOffset", int(scene.texels.size()));
         g.integer("diskOn", scene.disk.enabled ? 1 : 0);
         const auto normal = normalized(scene.disk.normal);
-        glUniform3f(glGetUniformLocation(g.trace, "diskAxis"), float(normal.x), float(normal.y), float(normal.z));
-        glUniform4f(glGetUniformLocation(g.trace, "diskConfig"),
-                    scene.disk.innerRadius,
-                    scene.disk.outerRadius,
-                    scene.disk.peakTemperature,
-                    scene.disk.emissionScale);
+        glUniform3f(glGetUniformLocation(g.trace, "diskAxis"), float(normal.x), float(normal.y),
+                    float(normal.z));
+        glUniform4f(glGetUniformLocation(g.trace, "diskConfig"), scene.disk.innerRadius,
+                    scene.disk.outerRadius, scene.disk.peakTemperature, scene.disk.emissionScale);
         glUniform1f(glGetUniformLocation(g.trace, "airHeight"), scene.atmosphereHeight);
         g.sceneReady = true;
         checkGl("Scene upload");
     }
 
-    void GpuRenderer::updateGeometry(const SceneData& scene)
+    void GpuRenderer::updateGeometry(const SceneData &scene)
     {
-        auto& g = *impl;
+        auto &g = *impl;
+
         if (scene.spheres.size() != g.observerGeometry.spheres.size())
             throw std::runtime_error("Geometry edits must preserve body indices");
+
         for (const auto sphere : scene.spheres)
             if (!std::isfinite(sphere.centerRadius.x) || !std::isfinite(sphere.centerRadius.y) ||
                 !std::isfinite(sphere.centerRadius.z))
@@ -317,34 +330,39 @@ namespace rt
 
     int GpuRenderer::pickDisplayed(double u, double v) const
     {
-        const auto& g = *impl;
+        const auto &g = *impl;
+
         if (!g.displayedTexture || u < 0 || u > 1 || v < 0 || v > 1)
             return -1;
+
         return pickBody(g.displayedGeometry, g.displayedSettings, g.displayedCamera, u, v);
     }
 
-    const std::vector<Vec3>& GpuRenderer::bodyAnchors() const
+    const std::vector<Vec3> &GpuRenderer::bodyAnchors() const
     {
         return impl->anchors;
     }
 
-    void GpuRenderer::reset(const RenderSettings& settings, const CameraData& camera)
+    void GpuRenderer::reset(const RenderSettings &settings, const CameraData &camera)
     {
         settings.validate();
         const auto basis = camera.basis(double(settings.width) / settings.height);
-        auto& g = *impl;
+        auto &g = *impl;
         g.wait();
         poll();
 
         if (!g.sceneReady)
             throw std::runtime_error("Upload a scene before rendering");
+
         GLint maxTexture = 0;
         glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTexture);
 
         if (settings.width > maxTexture || settings.height > maxTexture)
             throw std::runtime_error("Image exceeds GPU texture limit");
+
         const auto pixels = static_cast<std::size_t>(settings.width) * settings.height;
-        const bool resized = !g.texture || settings.width != g.settings.width || settings.height != g.settings.height;
+        const bool resized =
+            !g.texture || settings.width != g.settings.width || settings.height != g.settings.height;
 
         if (resized)
         {
@@ -371,6 +389,7 @@ namespace rt
         glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32I, settings.width, settings.height);
         glBindImageTexture(1, g.bodyIdTexture, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R32I);
         g.anchorsPublished = false;
+
         if (g.anchors.empty())
             g.anchors.resize(g.observerGeometry.spheres.size());
 
@@ -391,10 +410,8 @@ namespace rt
         const auto observer = observerSettings(g.observerGeometry, settings, camera);
         g.integer("observerType", int(settings.observerType));
         g.integer("useObserverFrame", observer.useObserverFrame ? 1 : 0);
-        glUniform3f(glGetUniformLocation(g.trace, "observerBeta"),
-                    float(observer.observerVelocity.x),
-                    float(observer.observerVelocity.y),
-                    float(observer.observerVelocity.z));
+        glUniform3f(glGetUniformLocation(g.trace, "observerBeta"), float(observer.observerVelocity.x),
+                    float(observer.observerVelocity.y), float(observer.observerVelocity.z));
 
         glUniform1f(glGetUniformLocation(g.trace, "relTolerance"), settings.relativeTolerance);
         glUniform1f(glGetUniformLocation(g.trace, "absTolerance"), settings.absoluteTolerance);
@@ -403,17 +420,18 @@ namespace rt
         const char* names[] = {"cameraOrigin", "cameraCorner", "cameraHorizontal", "cameraVertical"};
 
         for (int i = 0; i < 4; ++i)
-            glUniform3f(
-                glGetUniformLocation(g.trace, names[i]), float(basis[i].x), float(basis[i].y), float(basis[i].z));
+            glUniform3f(glGetUniformLocation(g.trace, names[i]), float(basis[i].x), float(basis[i].y),
+                        float(basis[i].z));
         checkGl("Renderer reset");
     }
 
     bool GpuRenderer::poll()
     {
-        auto& g = *impl;
+        auto &g = *impl;
 
         if (!g.fence)
             return false;
+
         const auto result = glClientWaitSync(g.fence, 0, 0);
 
         if (result == GL_TIMEOUT_EXPIRED)
@@ -421,6 +439,7 @@ namespace rt
 
         if (result == GL_WAIT_FAILED)
             throw std::runtime_error("GPU fence failed");
+
         glDeleteSync(g.fence);
         g.fence = nullptr;
 
@@ -457,21 +476,8 @@ namespace rt
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             }
 
-            glCopyImageSubData(g.texture,
-                               GL_TEXTURE_2D,
-                               0,
-                               0,
-                               0,
-                               0,
-                               g.displayedTexture,
-                               GL_TEXTURE_2D,
-                               0,
-                               0,
-                               0,
-                               0,
-                               g.settings.width,
-                               g.settings.height,
-                               1);
+            glCopyImageSubData(g.texture, GL_TEXTURE_2D, 0, 0, 0, 0, g.displayedTexture, GL_TEXTURE_2D, 0, 0,
+                               0, 0, g.settings.width, g.settings.height, 1);
             if (!g.anchorsPublished)
             {
                 // Use the largest connected image of each body. A nearest member
@@ -483,24 +489,26 @@ namespace rt
                 g.anchors.assign(g.observerGeometry.spheres.size(), Vec3(0));
                 std::vector<std::size_t> largest(g.anchors.size(), 0);
                 std::vector<int> component;
+
                 for (int start = 0; start < int(ids.size()); ++start)
                 {
                     const int body = ids[start];
+
                     if (body < 0 || body >= int(g.anchors.size()))
                         continue;
+
                     component.clear();
                     component.push_back(start);
                     ids[start] = -1;
                     double sx = 0, sy = 0;
+
                     for (std::size_t head = 0; head < component.size(); ++head)
                     {
                         int pixel = component[head], x = pixel % width, y = pixel / width;
                         sx += x;
                         sy += y;
-                        int adjacent[] = {x > 0 ? pixel - 1 : -1,
-                                          x + 1 < width ? pixel + 1 : -1,
-                                          y > 0 ? pixel - width : -1,
-                                          y + 1 < height ? pixel + width : -1};
+                        int adjacent[] = {x > 0 ? pixel - 1 : -1, x + 1 < width ? pixel + 1 : -1,
+                                          y > 0 ? pixel - width : -1, y + 1 < height ? pixel + width : -1};
                         for (int next : adjacent)
                             if (next >= 0 && ids[next] == body)
                             {
@@ -508,30 +516,38 @@ namespace rt
                                 component.push_back(next);
                             }
                     }
+
                     if (component.size() <= largest[body])
                         continue;
+
                     largest[body] = component.size();
                     sx /= component.size();
                     sy /= component.size();
                     int nearest = component[0];
                     double best = 1e30;
+
                     for (const int pixel : component)
                     {
                         double dx = pixel % width - sx, dy = pixel / width - sy;
+
                         if (dx * dx + dy * dy < best)
                         {
                             best = dx * dx + dy * dy;
                             nearest = pixel;
                         }
                     }
+
                     g.anchors[body] = {(nearest % width + 0.5) / width, (nearest / width + 0.5) / height, 1};
                 }
+
                 g.anchorsPublished = true;
             }
+
             g.displayedSettings = g.settings;
             g.displayedCamera = g.camera;
             g.displayedGeometry = g.observerGeometry;
         }
+
         checkGl("GPU completion");
 
         return true;
@@ -539,13 +555,14 @@ namespace rt
 
     bool GpuRenderer::dispatch()
     {
-        auto& g = *impl;
+        auto &g = *impl;
 
         if (!g.texture)
             throw std::runtime_error("Reset the renderer before dispatch");
 
         if (g.fence || g.stats.finished)
             return false;
+
         const std::uint32_t counters[4]{};
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, g.buffers[5]);
         glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(counters), counters);
@@ -571,7 +588,7 @@ namespace rt
 
     void GpuRenderer::present(int width, int height)
     {
-        const auto& g = *impl;
+        const auto &g = *impl;
         glViewport(0, 0, width, height);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_BLEND);
@@ -581,6 +598,7 @@ namespace rt
 
         if (!g.displayedTexture)
             return;
+
         glUseProgram(g.display);
         glUniform1f(glGetUniformLocation(g.display, "exposure"), g.displayedSettings.exposure);
         glActiveTexture(GL_TEXTURE0);
@@ -592,10 +610,13 @@ namespace rt
 
     DisplayImage GpuRenderer::displayImage()
     {
-        auto& g = *impl;
+        auto &g = *impl;
+
         if (!g.displayedTexture)
             return {};
+
         int w = g.displayedSettings.width, h = g.displayedSettings.height;
+
         if (!g.displayTarget || w != g.displayWidth || h != g.displayHeight)
         {
             if (!g.displayFramebuffer)
@@ -611,31 +632,37 @@ namespace rt
             g.displayWidth = w;
             g.displayHeight = h;
         }
+
         GLint oldFramebuffer = 0;
         glGetIntegerv(GL_FRAMEBUFFER_BINDING, &oldFramebuffer);
         glBindFramebuffer(GL_FRAMEBUFFER, g.displayFramebuffer);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.displayTarget, 0);
+
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         {
             glBindFramebuffer(GL_FRAMEBUFFER, oldFramebuffer);
             throw std::runtime_error("Viewport framebuffer is incomplete");
         }
+
         present(w, h);
         glBindFramebuffer(GL_FRAMEBUFFER, oldFramebuffer);
+
         return {g.displayTarget, w, h};
     }
 
-    std::vector<unsigned char> GpuRenderer::readDisplayedRgba(int& width, int& height)
+    std::vector<unsigned char> GpuRenderer::readDisplayedRgba(int &width, int &height)
     {
-        const auto& g = *impl;
+        const auto &g = *impl;
+
         if (!g.displayedTexture)
             throw std::runtime_error("The first image is still rendering");
 
-        const auto& settings = g.displayedSettings;
+        const auto &settings = g.displayedSettings;
         std::vector<Float4> pixels(std::size_t(settings.width) * settings.height);
         glBindTexture(GL_TEXTURE_2D, g.displayedTexture);
         glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, pixels.data());
-        for (auto& pixel : pixels)
+
+        for (auto &pixel : pixels)
         {
             pixel.x /= pixel.w;
             pixel.y /= pixel.w;
@@ -645,10 +672,11 @@ namespace rt
         checkGl("Displayed image readback");
         width = settings.width;
         height = settings.height;
+
         return displayRgba(pixels, width, height, settings.exposure);
     }
 
-    void GpuRenderer::saveDisplayed(const std::filesystem::path& path)
+    void GpuRenderer::saveDisplayed(const std::filesystem::path &path)
     {
         int width = 0, height = 0;
         auto rgba = readDisplayedRgba(width, height);
@@ -657,17 +685,18 @@ namespace rt
 
     std::vector<Float4> GpuRenderer::readback()
     {
-        auto& g = *impl;
+        auto &g = *impl;
         g.wait();
         poll();
         std::vector<Float4> pixels(std::size_t(g.settings.width) * g.settings.height);
 
         if (!g.hasImage)
             return pixels;
+
         glBindTexture(GL_TEXTURE_2D, g.texture);
         glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, pixels.data());
 
-        for (auto& c : pixels)
+        for (auto &c : pixels)
         {
             const float n = std::max(c.w, 1.f);
             c.x /= n;
@@ -680,19 +709,19 @@ namespace rt
         return pixels;
     }
 
-    std::vector<RayResult> GpuRenderer::traceRays(const SceneData& scene,
-                                                  const RenderSettings& settings,
-                                                  const std::vector<std::array<Vec3, 2>>& rays)
+    std::vector<RayResult> GpuRenderer::traceRays(const SceneData &scene, const RenderSettings &settings,
+                                                  const std::vector<std::array<Vec3, 2>> &rays)
     {
         if (rays.empty())
             return {};
+
         auto s = settings;
         s.width = int(rays.size());
         s.height = 1;
         s.samples = 1;
         uploadScene(scene);
         reset(s, CameraData{});
-        auto& g = *impl;
+        auto &g = *impl;
         std::vector<Float4> input;
 
         for (auto ray : rays)
@@ -704,10 +733,8 @@ namespace rt
         // Diagnostic rays have no camera basis: their supplied velocity uses the
         // same world-aligned tetrad convention as traceCpu's low-level API.
         g.integer("useObserverFrame", settings.useObserverFrame ? 1 : 0);
-        glUniform3f(glGetUniformLocation(g.trace, "observerBeta"),
-                    float(settings.observerVelocity.x),
-                    float(settings.observerVelocity.y),
-                    float(settings.observerVelocity.z));
+        glUniform3f(glGetUniformLocation(g.trace, "observerBeta"), float(settings.observerVelocity.x),
+                    float(settings.observerVelocity.y), float(settings.observerVelocity.z));
 
         while (!g.stats.finished)
         {
@@ -718,8 +745,8 @@ namespace rt
 
         std::vector<StoredState> states(rays.size());
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, g.buffers[4]);
-        glGetBufferSubData(
-            GL_SHADER_STORAGE_BUFFER, 0, GLsizeiptr(states.size() * sizeof(StoredState)), states.data());
+        glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, GLsizeiptr(states.size() * sizeof(StoredState)),
+                           states.data());
         std::vector<RayResult> result;
 
         for (auto a : states)
@@ -733,13 +760,13 @@ namespace rt
         return result;
     }
 
-    const GpuProgress& GpuRenderer::progress() const
+    const GpuProgress &GpuRenderer::progress() const
     {
         return impl->stats;
     }
 
-    const std::string& GpuRenderer::device() const
+    const std::string &GpuRenderer::device() const
     {
         return impl->deviceName;
     }
-}
+} // namespace rt

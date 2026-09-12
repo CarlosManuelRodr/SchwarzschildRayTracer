@@ -26,92 +26,89 @@ extern "C"
 
 namespace
 {
-std::filesystem::path executableDirectory()
-{
-    const char* path = SDL_GetBasePath();
-    if (!path)
-        throw std::runtime_error(std::string("Cannot resolve executable path: ") + SDL_GetError());
-    return std::filesystem::u8path(path);
-}
-
-using Clock = std::chrono::steady_clock;
-
-double seconds(Clock::time_point start)
-{
-    return std::chrono::duration<double>(Clock::now() - start).count();
-}
-
-void benchmark(const std::filesystem::path& assets, rt::RenderSettings settings, bool compareCpu = true)
-{
-    rt::SdlGlWindow context(1, 1, true);
-    auto scene = rt::defaultScene(assets);
-    rt::CameraData camera;
-    rt::GpuRenderer gpu(assets);
-    gpu.uploadScene(scene);
-    auto warm = settings;
-    warm.width = 32;
-    warm.height = 24;
-    warm.samples = 1;
-    gpu.reset(warm, camera);
-
-    while (!gpu.progress().finished)
+    std::filesystem::path executableDirectory()
     {
-        gpu.poll();
-        gpu.dispatch();
-        std::this_thread::yield();
+        const char* path = SDL_GetBasePath();
+
+        if (!path)
+            throw std::runtime_error(std::string("Cannot resolve executable path: ") + SDL_GetError());
+
+        return std::filesystem::u8path(path);
     }
 
-    gpu.reset(settings, camera);
-    auto start = Clock::now();
+    using Clock = std::chrono::steady_clock;
 
-    while (!gpu.progress().finished)
+    double seconds(Clock::time_point start)
     {
-        gpu.poll();
-        gpu.dispatch();
-        std::this_thread::yield();
+        return std::chrono::duration<double>(Clock::now() - start).count();
     }
 
-    auto image = gpu.readback();
-    double gpuSeconds = seconds(start);
-    std::cout << "GPU: " << gpu.device() << "\n"
-              << settings.width << "x" << settings.height << ", " << settings.samples << " samples\n"
-              << "GPU compute: " << gpu.progress().totalGpuMilliseconds / 1000
-              << " s\nGPU completion including readback: " << gpuSeconds
-              << " s\nLongest GPU batch: " << gpu.progress().maxBatchMilliseconds
-              << " ms\nGPU invalid rays: " << gpu.progress().failures << std::endl;
-    rt::savePng(executableDirectory() / "Output" / (compareCpu ? "benchmark-gpu.png" : "render-gpu.png"),
-                settings.width,
-                settings.height,
-                image,
-                settings.exposure);
-
-    if (!compareCpu)
-        return;
-    start = Clock::now();
-    std::uint64_t failures = 0;
-    auto cpu = rt::renderCpu(scene, settings, camera, &failures);
-    double cpuSeconds = seconds(start);
-    double squared = 0;
-
-    for (std::size_t i = 0; i < image.size(); ++i)
+    void benchmark(const std::filesystem::path &assets, rt::RenderSettings settings, bool compareCpu = true)
     {
-        double x = image[i].x - cpu[i].x, y = image[i].y - cpu[i].y, z = image[i].z - cpu[i].z;
-        squared += x * x + y * y + z * z;
+        rt::SdlGlWindow context(1, 1, true);
+        auto scene = rt::defaultScene(assets);
+        rt::CameraData camera;
+        rt::GpuRenderer gpu(assets);
+        gpu.uploadScene(scene);
+        auto warm = settings;
+        warm.width = 32;
+        warm.height = 24;
+        warm.samples = 1;
+        gpu.reset(warm, camera);
+
+        while (!gpu.progress().finished)
+        {
+            gpu.poll();
+            gpu.dispatch();
+            std::this_thread::yield();
+        }
+
+        gpu.reset(settings, camera);
+        auto start = Clock::now();
+
+        while (!gpu.progress().finished)
+        {
+            gpu.poll();
+            gpu.dispatch();
+            std::this_thread::yield();
+        }
+
+        auto image = gpu.readback();
+        double gpuSeconds = seconds(start);
+        std::cout << "GPU: " << gpu.device() << "\n"
+                  << settings.width << "x" << settings.height << ", " << settings.samples << " samples\n"
+                  << "GPU compute: " << gpu.progress().totalGpuMilliseconds / 1000
+                  << " s\nGPU completion including readback: " << gpuSeconds
+                  << " s\nLongest GPU batch: " << gpu.progress().maxBatchMilliseconds
+                  << " ms\nGPU invalid rays: " << gpu.progress().failures << std::endl;
+        rt::savePng(executableDirectory() / "Output" / (compareCpu ? "benchmark-gpu.png" : "render-gpu.png"),
+                    settings.width, settings.height, image, settings.exposure);
+
+        if (!compareCpu)
+            return;
+
+        start = Clock::now();
+        std::uint64_t failures = 0;
+        auto cpu = rt::renderCpu(scene, settings, camera, &failures);
+        double cpuSeconds = seconds(start);
+        double squared = 0;
+
+        for (std::size_t i = 0; i < image.size(); ++i)
+        {
+            double x = image[i].x - cpu[i].x, y = image[i].y - cpu[i].y, z = image[i].z - cpu[i].z;
+            squared += x * x + y * y + z * z;
+        }
+
+        rt::savePng(executableDirectory() / "Output" / "benchmark-cpu.png", settings.width, settings.height,
+                    cpu, settings.exposure);
+        std::cout << "CPU reference (double precision, all cores): " << cpuSeconds
+                  << " s\nCompletion speedup: " << cpuSeconds / gpuSeconds
+                  << "x\nLinear RGB RMSE: " << std::sqrt(squared / (3 * image.size()))
+                  << "\nCPU invalid rays: " << failures << std::endl;
+
+        if (failures || gpu.progress().failures)
+            throw std::runtime_error("Benchmark encountered invalid rays");
     }
-
-    rt::savePng(executableDirectory() / "Output" / "benchmark-cpu.png",
-                settings.width,
-                settings.height,
-                cpu,
-                settings.exposure);
-    std::cout << "CPU reference (double precision, all cores): " << cpuSeconds
-              << " s\nCompletion speedup: " << cpuSeconds / gpuSeconds
-              << "x\nLinear RGB RMSE: " << std::sqrt(squared / (3 * image.size()))
-              << "\nCPU invalid rays: " << failures << std::endl;
-
-    if (failures || gpu.progress().failures)
-        throw std::runtime_error("Benchmark encountered invalid rays");
-}
 } // namespace
 
 int main(int argc, char** argv)
@@ -147,8 +144,10 @@ int main(int argc, char** argv)
             {
                 if (++i >= argc)
                     throw std::runtime_error("Missing value for --exposure");
+
                 std::size_t used = 0;
                 settings.exposure = std::stof(argv[i], &used);
+
                 if (used != std::string(argv[i]).size())
                     throw std::runtime_error("Invalid exposure");
             }
@@ -156,8 +155,10 @@ int main(int argc, char** argv)
             {
                 if (++i >= argc)
                     throw std::runtime_error("Missing value for --slow-step");
+
                 std::size_t used = 0;
                 slowMovementStep = std::stod(argv[i], &used);
+
                 if (used != std::string(argv[i]).size() || !std::isfinite(slowMovementStep) ||
                     slowMovementStep <= 0 || slowMovementStep >= normalMovementStep)
                     throw std::runtime_error("--slow-step must be greater than 0 and less than 0.05");
@@ -218,12 +219,16 @@ int main(int argc, char** argv)
 
         if (mode == "--test-animation")
             return rt::runAnimationTests();
+
         if (mode == "--test-export")
             return rt::runExportTests(executableDirectory() / "Output");
+
         rt::SdlVideo video;
+
         if (mode == "--test-export-gpu")
         {
             rt::SdlGlWindow context(1, 1, true);
+
             return rt::runExportGpuTests(assets, executableDirectory() / "Output");
         }
 
@@ -245,6 +250,7 @@ int main(int argc, char** argv)
         rt::CameraData camera;
         const rt::CameraData initialCamera = camera;
         rt::SdlGlWindow window(settings.width, settings.height);
+
         if (!SDL_GL_SetSwapInterval(1))
             std::cerr << "VSync unavailable: " << SDL_GetError() << '\n';
 
@@ -297,6 +303,7 @@ int main(int argc, char** argv)
         {
             if (imageDialog || imageWrite.valid())
                 return;
+
             try
             {
                 // Capture the displayed image now; later camera edits cannot change the saved image.
@@ -307,8 +314,9 @@ int main(int argc, char** argv)
                 {
                     std::unique_ptr<std::shared_ptr<ImageDestination>> owner(
                         static_cast<std::shared_ptr<ImageDestination>*>(data));
-                    auto& result = **owner;
+                    auto &result = **owner;
                     std::lock_guard<std::mutex> lock(result.mutex);
+
                     if (!paths)
                         result.error = SDL_GetError();
                     else if (paths[0])
@@ -318,7 +326,7 @@ int main(int argc, char** argv)
                 static const SDL_DialogFileFilter filters[] = {{"PNG image", "png"}};
                 SDL_ShowSaveFileDialog(callback, context, window.get(), filters, 1, "image.png");
             }
-            catch (const std::exception& error)
+            catch (const std::exception &error)
             {
                 panel.setStatus(error.what(), true);
             }
@@ -335,6 +343,7 @@ int main(int argc, char** argv)
                 panel.processEvent(event);
                 const bool captureMouse = panel.capturesMouse() || timeline.busy();
                 const bool captureKeyboard = panel.capturesKeyboard() || timeline.busy();
+
                 if (captureMouse)
                     dragging = false;
                 if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
@@ -381,11 +390,13 @@ int main(int argc, char** argv)
                 {
                     SDL_FPoint position{event.motion.x, event.motion.y};
                     SDL_FPoint delta{position.x - mousePosition.x, position.y - mousePosition.y};
+
                     if (!lookMoved &&
                         std::hypot(position.x - clickPosition.x, position.y - clickPosition.y) >= 4)
                         lookMoved = true;
                     if (!lookMoved)
                         continue;
+
                     mousePosition = position;
 
                     if (delta.x != 0 || delta.y != 0)
@@ -400,6 +411,7 @@ int main(int argc, char** argv)
                     !captureKeyboard)
                 {
                     rt::Vec3 movement;
+
                     switch (event.key.key)
                     {
                     case SDLK_RIGHT:
@@ -430,9 +442,8 @@ int main(int argc, char** argv)
 
                     if (rt::dot(movement, movement) > 0)
                     {
-                        camera.moveLocal(movement,
-                                         (event.key.mod & SDL_KMOD_SHIFT) ? slowMovementStep
-                                                                          : normalMovementStep);
+                        camera.moveLocal(movement, (event.key.mod & SDL_KMOD_SHIFT) ? slowMovementStep
+                                                                                    : normalMovementStep);
                         reset = true;
                         tapped = true;
                     }
@@ -443,6 +454,7 @@ int main(int argc, char** argv)
                     minimized = true;
                     dragging = false;
                 }
+
                 if (event.type == SDL_EVENT_WINDOW_RESTORED)
                 {
                     minimized = false;
@@ -455,6 +467,7 @@ int main(int argc, char** argv)
                     minimized = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MINIMIZED) != 0 ||
                                 event.window.data1 <= 0 || event.window.data2 <= 0;
                 }
+
                 if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)
                     dragging = false;
             }
@@ -481,9 +494,11 @@ int main(int argc, char** argv)
                     path = imageDialog->path;
                     error = imageDialog->error;
                 }
+
                 if (ready)
                 {
                     imageDialog.reset();
+
                     if (!error.empty())
                         panel.setStatus("Cannot save image: " + error, true);
                     else if (path.empty())
@@ -491,6 +506,7 @@ int main(int argc, char** argv)
                     else
                     {
                         auto destination = std::filesystem::u8path(path);
+
                         if (destination.extension().empty())
                             destination += ".png";
                         imageWrite = std::async(
@@ -498,13 +514,16 @@ int main(int argc, char** argv)
                             [destination, pixels = std::move(savedImage), w = savedWidth, h = savedHeight]()
                             {
                                 rt::saveRgbaPng(destination, w, h, pixels);
+
                                 return destination.u8string();
                             });
                         panel.setStatus("Saving image...");
                     }
+
                     savedImage.clear();
                 }
             }
+
             if (imageWrite.valid() &&
                 imageWrite.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
             {
@@ -512,17 +531,19 @@ int main(int argc, char** argv)
                 {
                     panel.setStatus("Saved " + imageWrite.get());
                 }
-                catch (const std::exception& error)
+                catch (const std::exception &error)
                 {
                     panel.setStatus(error.what(), true);
                 }
             }
+
             panel.setDisplayImage(renderer.displayImage());
             panel.setBodyAnchors(renderer.bodyAnchors());
             panel.beginFrame();
             auto actions =
                 panel.draw(slowMovementStep, renderer.progress(), activeSettings, preview, camera, scene);
             timeline.draw(panel, settings);
+
             if (actions.quit)
                 running = false;
             if (!timeline.busy() && matchWindow && panel.viewportArea().width > 0 &&
@@ -530,39 +551,46 @@ int main(int argc, char** argv)
             {
                 auto pixels = panel.viewportPixels();
                 auto size = renderer.fitResolution(pixels[0], pixels[1]);
+
                 if (size[0] != settings.width || size[1] != settings.height)
                 {
                     settings.width = size[0];
                     settings.height = size[1];
+
                     if (pendingMatchWindow)
                     {
                         pendingSettings.width = size[0];
                         pendingSettings.height = size[1];
                     }
+
                     panel.syncResolution(size[0], size[1]);
                     reset = true;
                 }
             }
+
             if (actions.body >= 0 && actions.body < int(scene.spheres.size()))
             {
-                auto& center = scene.spheres[actions.body].centerRadius;
+                auto &center = scene.spheres[actions.body].centerRadius;
                 center.x = float(actions.bodyPosition.x);
                 center.y = float(actions.bodyPosition.y);
                 center.z = float(actions.bodyPosition.z);
                 geometryDirty = true;
                 reset = true;
             }
+
             if (actions.positionChanged)
             {
                 camera.lookAt += actions.position - camera.position;
                 camera.position = actions.position;
                 reset = true;
             }
+
             if (actions.resetCamera)
             {
                 camera = initialCamera;
                 reset = true;
             }
+
             if (actions.save)
                 saveImage();
             if (actions.renderChanged)
@@ -570,6 +598,7 @@ int main(int argc, char** argv)
                 try
                 {
                     auto requested = panel.requestedSettings();
+
                     if (panel.followsWindow() && panel.viewportArea().width > 0 &&
                         panel.viewportArea().height > 0)
                     {
@@ -578,8 +607,10 @@ int main(int argc, char** argv)
                         requested.width = size[0];
                         requested.height = size[1];
                     }
+
                     requested.validate();
                     const auto supported = renderer.fitResolution(requested.width, requested.height);
+
                     if (supported[0] != requested.width || supported[1] != requested.height)
                         throw std::runtime_error(
                             "Resolution exceeds GPU memory budget. Reduce width or height.");
@@ -590,7 +621,7 @@ int main(int argc, char** argv)
                     lastSettingsEdit = now;
                     panel.setStatus("Updating render...");
                 }
-                catch (const std::exception& error)
+                catch (const std::exception &error)
                 {
                     renderSettingsPending = false;
                     panel.setStatus(error.what(), true);
@@ -619,17 +650,14 @@ int main(int argc, char** argv)
             renderer.poll();
             bool wasBusy = timeline.busy();
             bool animated =
-                timeline.update(scene,
-                                camera,
-                                renderer,
-                                settings,
-                                activeSettings,
+                timeline.update(scene, camera, renderer, settings, activeSettings,
                                 dragging || panel.manipulatingBody() || ImGui::IsAnyItemActive() || reset);
             if (animated)
             {
                 geometryDirty = true;
                 reset = true;
             }
+
             if (timeline.busy())
             {
                 cameraPending = false;
@@ -643,6 +671,7 @@ int main(int argc, char** argv)
                 preview = false;
                 cameraPending = true;
             }
+
             if (reset)
             {
                 cameraPending = true;
@@ -657,11 +686,13 @@ int main(int argc, char** argv)
                     matchWindow = pendingMatchWindow;
                     preview = false;
                     activeSettings = settings;
+
                     if (geometryDirty)
                     {
                         renderer.updateGeometry(scene);
                         geometryDirty = false;
                     }
+
                     renderer.reset(activeSettings, camera);
                     cameraPending = false;
                     renderSettingsPending = false;
@@ -672,10 +703,12 @@ int main(int argc, char** argv)
                 // key would continually cancel the slow rays and no preview would finish.
                 bool settled = std::chrono::duration<double>(now - lastMovement).count() >= 0.15;
                 bool canReplace = !preview || renderer.progress().finished;
+
                 if (canReplace && (cameraPending || (preview && settled)))
                 {
                     preview = !settled;
                     activeSettings = settings;
+
                     if (preview)
                     {
                         activeSettings.width = std::max(1, settings.width / 4);
@@ -688,6 +721,7 @@ int main(int argc, char** argv)
                         renderer.updateGeometry(scene);
                         geometryDirty = false;
                     }
+
                     renderer.reset(activeSettings, camera);
                     cameraPending = false;
                 }
@@ -710,7 +744,7 @@ int main(int argc, char** argv)
 
         return 0;
     }
-    catch (const std::exception& error)
+    catch (const std::exception &error)
     {
         std::cerr << "Error: " << error.what() << std::endl;
 

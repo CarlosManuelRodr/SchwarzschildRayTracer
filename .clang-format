@@ -3,12 +3,13 @@ IndentWidth: 4
 ContinuationIndentWidth: 4
 ColumnLimit: 110
 BreakBeforeBraces: Allman
-NamespaceIndentation: None
+NamespaceIndentation: All
 PointerAlignment: Left
-ReferenceAlignment: Left
+ReferenceAlignment: Right
+AccessModifierOffset: -4
 SortIncludes: Never
 IncludeBlocks: Preserve
-AllowShortFunctionsOnASingleLine: None
+AllowShortFunctionsOnASingleLine: Empty
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
 AllowShortBlocksOnASingleLine: Never
@@ -16,5 +17,5 @@ AllowShortLambdasOnASingleLine: None
 AllowShortEnumsOnASingleLine: false
 SeparateDefinitionBlocks: Always
 MaxEmptyLinesToKeep: 2
-BinPackArguments: false
-BinPackParameters: false
+BinPackArguments: true
+BinPackParameters: true

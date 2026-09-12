@@ -1,10 +1,17 @@
+/**
+ * @file
+ * @brief Historical CPU teaching implementation, retained for reference.
+ *
+ * The current application uses rt::SceneData and the shared TraceCore.inl kernel.
+ */
 #pragma once
 #include "Ray.h"
 
 /**
  * @class Camera
- * @brief Cámara con posición y dirección configurables.
- * La cámara se encarga de producir los rayos que se simularán por cada píxel.
+ * @brief Pinhole camera with configurable position and view direction.
+ *
+ * Generates the primary rays traced for each image pixel.
  */
 class Camera
 {
@@ -34,7 +41,8 @@ private:
     }
 
 public:
-
+    /** @brief Construct the image plane from a view pose, vertical FOV in degrees, and width/height aspect.
+     */
     Camera(Vector3 lookFrom, Vector3 lookAt, Vector3 vUp, float vfov, float aspect)
     {
         m_lookFrom = lookFrom;
@@ -46,18 +54,21 @@ public:
         SetUp();
     }
 
+    /** @brief Move the ray origin and rebuild the image plane. */
     void SetLookFrom(Vector3 pos)
     {
         m_lookFrom = pos;
         SetUp();
     }
 
+    /** @brief Change the target point and rebuild the image plane. */
     void SetLookAt(Vector3 pos)
     {
         m_lookAt = pos;
         SetUp();
     }
 
+    /** @brief Return the unnormalized ray through image coordinates (u,v), measured from the lower left. */
     Ray GetRay(float u, float v) const
     {
         return Ray(origin, lowerLeftCorner + u * horizontal + v * vertical - origin);

@@ -23,6 +23,7 @@ namespace rt
     Vec3 normalized(const Vec3 &a)
     {
         const double n = std::sqrt(dot(a, a));
+
         return n > 1e-20 ? a / n : Vec3(0);
     }
 
@@ -104,16 +105,23 @@ namespace rt
     {
         if (observerType != Hovering && observerType != FreelyFalling)
             throw std::runtime_error("Invalid observer type");
+
         const double speedSquared = dot(observerVelocity, observerVelocity);
+
         if (!std::isfinite(speedSquared) || speedSquared > 0.999 * 0.999 + 1e-12)
             throw std::runtime_error("Observer speed must not exceed 0.999c");
+
         if (integrationMode < FixedRadius || integrationMode > AdaptiveCutoff)
             throw std::runtime_error("Invalid integration mode");
+
         if (width <= 0 || height <= 0 || width > 8192 || height > 8192 || samples <= 0 || samples > 1000000 ||
-            !(exposure > 0) || !std::isfinite(exposure) || !(relativeTolerance > 0) || !(absoluteTolerance > 0) ||
-            !(maxStep > 0) || maxStep > 0.05f || !std::isfinite(relativeTolerance) ||
-            !std::isfinite(absoluteTolerance) || maxIntegrationAttempts <= 0 || maxIntegrationAttempts > 16384 ||
-            static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) * static_cast<std::uint64_t>(samples) > 0xffffffffull)
+            !(exposure > 0) || !std::isfinite(exposure) || !(relativeTolerance > 0) ||
+            !(absoluteTolerance > 0) || !(maxStep > 0) || maxStep > 0.05f ||
+            !std::isfinite(relativeTolerance) || !std::isfinite(absoluteTolerance) ||
+            maxIntegrationAttempts <= 0 || maxIntegrationAttempts > 16384 ||
+            static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) *
+                    static_cast<std::uint64_t>(samples) >
+                0xffffffffull)
             throw std::runtime_error(
                 "Invalid render settings (dimensions 1..8192, samples 1..1000000, step <= 0.05)");
     }
@@ -122,12 +130,14 @@ namespace rt
     {
         if (spheres.empty() || materials.empty() || textures.empty())
             throw std::runtime_error("Empty scene data");
+
         auto finite = [](const Float4 v)
         {
             return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z) && std::isfinite(v.w);
         };
 
         int fields = 0;
+
         for (auto [centerRadius, material] : spheres)
         {
             if (!finite(centerRadius) || centerRadius.w <= 0 || material.x < 0 ||
@@ -187,6 +197,7 @@ namespace rt
                 throw std::runtime_error("Invalid or cyclic texture graph");
 
             auto [kindChildren, color, image] = textures[i];
+
             if (!finite(color) || kindChildren.x < 0 || kindChildren.x > Image)
                 throw std::runtime_error("Invalid texture");
 
@@ -215,9 +226,8 @@ namespace rt
                 throw std::runtime_error("Nonfinite texel");
     }
 
-    RenderSettings observerSettings(const SceneData& scene,
-                                    const RenderSettings& settings,
-                                    const CameraData& camera)
+    RenderSettings observerSettings(const SceneData &scene, const RenderSettings &settings,
+                                    const CameraData &camera)
     {
         auto result = settings;
         const auto basis = camera.basis(1);
@@ -243,7 +253,7 @@ namespace rt
         return result;
     }
 
-    SceneData defaultScene(const std::filesystem::path& assets)
+    SceneData defaultScene(const std::filesystem::path &assets)
     {
         SceneData s;
         auto image = [&](const char* name, const bool linear = false)
@@ -251,21 +261,23 @@ namespace rt
             const auto path = assets / "textures" / name;
             // Read with filesystem::path to support Unicode asset paths on Windows.
             std::ifstream file(path, std::ios::binary | std::ios::ate);
-            const auto length = file ? static_cast<std::streamoff>(file.tellg()) : static_cast<std::streamoff>(-1);
+            const auto length =
+                file ? static_cast<std::streamoff>(file.tellg()) : static_cast<std::streamoff>(-1);
 
             if (length <= 0 || length > std::numeric_limits<int>::max())
                 throw std::runtime_error("Cannot read texture: " + path.string());
 
             std::vector<stbi_uc> encoded(static_cast<std::size_t>(length));
             file.seekg(0);
+
             if (!file.read(reinterpret_cast<char*>(encoded.data()), length))
                 throw std::runtime_error("Cannot read texture: " + path.string());
 
             int width = 0, height = 0, channels = 0;
             const std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> pixels(
-                stbi_load_from_memory(encoded.data(), static_cast<int>(length), &width, &height, &channels, 4),
-                stbi_image_free
-                );
+                stbi_load_from_memory(encoded.data(), static_cast<int>(length), &width, &height, &channels,
+                                      4),
+                stbi_image_free);
 
             if (!pixels)
                 throw std::runtime_error("Cannot decode texture: " + path.string());
@@ -273,6 +285,7 @@ namespace rt
             TextureData t;
             t.kindChildren.x = Image;
             t.image = {static_cast<int>(s.imageTexels.size()), width, height, linear ? 2 : 1};
+
             for (std::size_t i = 0; i < static_cast<std::size_t>(width) * height; ++i)
                 s.imageTexels.push_back(static_cast<std::uint32_t>(pixels.get()[4 * i]) |
                                         (static_cast<std::uint32_t>(pixels.get()[4 * i + 1]) << 8) |
@@ -315,10 +328,12 @@ namespace rt
             return 0;
 
         const double x = std::max(0.0, value * exposure);
+
         return std::clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
     }
 
-    Vec3 displayColor(const std::vector<Float4>& linear, const int width, const int height, const int x, const int y, const float exposure)
+    Vec3 displayColor(const std::vector<Float4> &linear, const int width, const int height, const int x,
+                      const int y, const float exposure)
     {
         Vec3 bloom;
 
@@ -340,24 +355,25 @@ namespace rt
 
         const auto pixel = linear[static_cast<std::size_t>(y) * width + x];
         const Vec3 hdr = exposure * Vec3(pixel.x, pixel.y, pixel.z) + 0.08 * bloom;
+
         return {toneMap(hdr.x), toneMap(hdr.y), toneMap(hdr.z)};
     }
 
-    void savePng(const std::filesystem::path& path,
-                 const int width,
-                 const int height,
-                 const std::vector<Float4>& linear,
-                 const float exposure)
+    void savePng(const std::filesystem::path &path, const int width, const int height,
+                 const std::vector<Float4> &linear, const float exposure)
     {
         if (width <= 0 || height <= 0 || linear.size() != static_cast<std::size_t>(width) * height)
             throw std::runtime_error("Wrong image size for PNG export");
+
         saveRgbaPng(path, width, height, displayRgba(linear, width, height, exposure));
     }
 
-    std::vector<unsigned char> displayRgba(const std::vector<Float4>& linear, const int width, const int height, const float exposure)
+    std::vector<unsigned char> displayRgba(const std::vector<Float4> &linear, const int width,
+                                           const int height, const float exposure)
     {
         if (width <= 0 || height <= 0 || linear.size() != static_cast<std::size_t>(width) * height)
             throw std::runtime_error("Wrong image size for display conversion");
+
         std::vector<unsigned char> rgba(linear.size() * 4);
 
         for (int y = 0; y < height; ++y)
@@ -373,7 +389,9 @@ namespace rt
 
         return rgba;
     }
-    void saveRgbaPng(const std::filesystem::path& path, const int width, const int height, const std::vector<unsigned char>& rgba)
+
+    void saveRgbaPng(const std::filesystem::path &path, const int width, const int height,
+                     const std::vector<unsigned char> &rgba)
     {
         if (width <= 0 || height <= 0 || rgba.size() != static_cast<std::size_t>(width) * height * 4)
             throw std::runtime_error("Wrong RGBA image size");
@@ -381,13 +399,13 @@ namespace rt
         if (!path.parent_path().empty())
             std::filesystem::create_directories(path.parent_path());
 
-        const SdlSurface image(
-            SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGBA32, const_cast<unsigned char*>(rgba.data()), width * 4),
-            SDL_DestroySurface
-            );
+        const SdlSurface image(SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGBA32,
+                                                     const_cast<unsigned char*>(rgba.data()), width * 4),
+                               SDL_DestroySurface);
 
         checkSdl(static_cast<bool>(image), "Create PNG surface");
+
         if (!SDL_SavePNG(image.get(), path.u8string().c_str()))
             throw std::runtime_error("Cannot save PNG: " + path.string() + ": " + SDL_GetError());
     }
-}
+} // namespace rt

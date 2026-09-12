@@ -1,3 +1,9 @@
+/**
+ * @file
+ * @brief Historical CPU teaching implementation, retained for reference.
+ *
+ * The current application uses rt::SceneData and the shared TraceCore.inl kernel.
+ */
 #pragma once
 #include "Ray.h"
 
@@ -6,26 +12,28 @@ class Hittable;
 
 /**
  * @struct HitRecord
- * @brief Estructura que guarda los parámetros de una colisión.
+ * @brief Intersection result containing position, surface normal, material, and texture coordinates.
  */
 struct HitRecord
 {
-    Vector3 p;          // Posición donde ocurre la colisión
-    Vector3 normal;     // Vector normal de la superficie colisionada
-    Material* matPtr;   // Puntero hacia el material del objecto colisionado
-    Hittable* object;   // Puntero hacia el objeto colisionado
-    float t;            // Parámetro donde ocurrió la colisión
-    float u;            // Coordenada de textura U de la colisión
-    float v;            // Coordenada de textura V de la colisión
+    Vector3 p;        ///< World-space intersection position.
+    Vector3 normal;   ///< Outward surface normal.
+    Material* matPtr; ///< Borrowed pointer to the surface material.
+    Hittable* object; ///< Borrowed pointer to the intersected object.
+    float t;          ///< Ray parameter at the intersection; not necessarily a distance.
+    float u;          ///< Horizontal texture coordinate at the intersection.
+    float v;          ///< Vertical texture coordinate at the intersection.
 };
 
 /**
  * @class Hitable
- * @brief Clase abstracta que representa un objeto colisionable.
+ * @brief Abstract interface for ray-intersectable geometry.
  */
 class Hitable
 {
 public:
     virtual ~Hitable() = default;
-    virtual bool Hit(const Ray& r, float tMin, float tMax, HitRecord& rec) const = 0;
+
+    /** @brief Find an intersection strictly between tMin and tMax; write rec only on success. */
+    virtual bool Hit(const Ray &r, float tMin, float tMax, HitRecord &rec) const = 0;
 };

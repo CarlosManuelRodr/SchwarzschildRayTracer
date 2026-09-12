@@ -1,15 +1,29 @@
+/**
+ * @file
+ * @brief OpenGL 4.3 compute entry point for resumable progressive ray tracing.
+ * One invocation owns one pixel (8x8 workgroups), including its random state.
+ * Each batch advances at most 64 trace actions and yields after one finished sample.
+ * The host clears batch counters and inserts barriers/fences between dispatch and readback.
+ * The TRACE_CORE marker is replaced by the shared source when loading the shader.
+ */
 #version 430 core
 #define real float
 #define INOUT(T) inout T
 #define OUT(T) out T
 layout(local_size_x = 8, local_size_y = 8) in;
 
+/**
+ * @brief std430 mirror of rt::SphereData; keep host/shader lane layouts identical.
+ */
 struct SphereData
 {
     vec4 centerRadius;
     ivec4 material;
 };
 
+/**
+ * @brief std430 material kind, base texture, physical parameters, and optional Earth layers.
+ */
 struct MaterialData
 {
     ivec4 kindTexture;
@@ -17,6 +31,9 @@ struct MaterialData
     ivec4 layers;
 };
 
+/**
+ * @brief std430 texture graph record; image.w selects float, packed sRGB, or packed linear data.
+ */
 struct TextureData
 {
     ivec4 kindChildren;
@@ -24,6 +41,12 @@ struct TextureData
     ivec4 image;
 };
 
+/**
+ * @brief Seven 16-byte lanes (112 bytes) preserving one unfinished sample.
+ * p/v/throughput/radiance use xyz. integration stores h2, step, observerLapse, energy.
+ * meta stores field, attempts, depth, status. random stores RNG, observer mode, body+1,
+ * and a reserved zero lane. Keep loadState/storeState and host StoredState synchronized.
+ */
 struct StoredState
 {
     vec4 p;
@@ -35,12 +58,21 @@ struct StoredState
     uvec4 random;
 };
 
+/**
+ * @brief Diagnostic world origin and initial look direction; w lanes are unused.
+ */
 struct TestRay
 {
     vec4 origin;
     vec4 direction;
 };
 
+/**
+ * @brief Read-only scene arrays use bindings 0..3; their indices are validated on the CPU.
+ * Bindings 4 and 5 store resumable pixel states and per-batch counters. Binding 6 holds
+ * diagnostic rays and binding 7 holds packed image data. The floating texel array also
+ * contains the blackbody table at thermalOffset.
+ */
 layout(std430, binding = 0) readonly buffer Spheres
 {
     SphereData spheres[];
@@ -84,6 +116,10 @@ layout(std430, binding = 7) readonly buffer ImageTexels
     uint imageTexels[];
 };
 
+/**
+ * @brief Per-pixel linear radiance sum in RGB and completed sample count in alpha.
+ * bodyIds stores the first-sample sphere ID, with -1 for background. Image y=0 is the bottom.
+ */
 layout(rgba32f, binding = 0) uniform image2D accumulation;
 layout(r32i, binding = 1) uniform iimage2D bodyIds;
 uniform ivec2 dimensions;
@@ -94,6 +130,11 @@ uniform vec3 observerBeta;
 uniform int useObserverFrame;
 uniform int observerType;
 
+/**
+ * @brief Host uniform adapters consumed by the shared CPU/GLSL core.
+ * observerBeta is already converted from view-local to world-aligned local-frame axes;
+ * observerType selects Hovering (0) or FreelyFalling (1), independently of gravityMode.
+ */
 bool hoveringObserver()
 {
     return observerType == 0;
@@ -123,6 +164,10 @@ uniform vec4 diskConfig;
 uniform vec3 diskAxis;
 uniform float airHeight;
 
+/**
+ * @brief Scene/material/disk accessors isolate std430 packing from the physics core.
+ * Missing hole/planet indices are -1; optional material texture layers are also -1.
+ */
 int sphereCount()
 {
     return spheres.length();
@@ -238,32 +283,44 @@ vec3 textureColor(int i)
     return textures[i].color.xyz;
 }
 
+/**
+ * @brief Fetch one texel, wrapping longitude and clamping latitude.
+ * Decode sRGB before filtering; normal maps/masks use linear data and skip decoding.
+ */
 vec3 imageTexel(int i, int x, int y)
 {
     ivec4 t = textures[i].image;
     x = (x % t.y + t.y) % t.y;
     y = clamp(y, 0, t.z - 1);
+
     if (t.w == 0)
         return texels[t.x + x + y * t.y].xyz;
+
     uint texelBits = imageTexels[t.x + x + y * t.y];
     vec3 c = vec3(texelBits & 255u, (texelBits >> 8) & 255u, (texelBits >> 16) & 255u) / 255.0;
+
     if (t.w == 1)
         c = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), greaterThan(c, vec3(0.04045)));
     return c;
 }
 
+/**
+ * @brief Sample an equirectangular image with bottom-up UVs and top-down stored rows.
+ * Packed textures use bilinear filtering; float reference fixtures retain nearest lookup.
+ */
 vec3 imageValue(int i, real u, real v)
 {
     ivec4 t = textures[i].image;
+
     if (t.w == 0)
-        return imageTexel(
-            i, clamp(int(u * t.y), 0, t.y - 1), clamp(int((1.0 - v) * t.z - 0.001), 0, t.z - 1));
+        return imageTexel(i, clamp(int(u * t.y), 0, t.y - 1),
+                          clamp(int((1.0 - v) * t.z - 0.001), 0, t.z - 1));
     vec2 p = vec2(u * t.y, (1.0 - v) * t.z) - 0.5;
     ivec2 base = ivec2(floor(p));
     vec2 f = fract(p);
+
     return mix(mix(imageTexel(i, base.x, base.y), imageTexel(i, base.x + 1, base.y), f.x),
-               mix(imageTexel(i, base.x, base.y + 1), imageTexel(i, base.x + 1, base.y + 1), f.x),
-               f.y);
+               mix(imageTexel(i, base.x, base.y + 1), imageTexel(i, base.x + 1, base.y + 1), f.x), f.y);
 }
 
 real maximumStep()
@@ -292,6 +349,9 @@ bool finiteScalar(real v)
 }
 
 // TRACE_CORE
+/**
+ * @brief Restore a resumable trace from the explicit GPU storage lanes.
+ */
 TraceState loadState(int i)
 {
     StoredState a = states[i];
@@ -315,6 +375,9 @@ TraceState loadState(int i)
     return s;
 }
 
+/**
+ * @brief Pack trace state for the next dispatch without changing its RNG or affine tangent.
+ */
 void storeState(int i, TraceState s)
 {
     states[i].p = vec4(s.p, 0);
@@ -326,12 +389,19 @@ void storeState(int i, TraceState s)
     states[i].random = uvec4(s.rng, uint(s.observerMode), uint(s.body + 1), 0);
 }
 
+/**
+ * @brief Resume or initialize a pixel sample, advance bounded work, and update batch counters.
+ * Seeds depend on pixel, completed-sample index, and user seed, not dispatch timing.
+ * firstPassOnly prevents fast pixels from taking a second sample until all pixels finish
+ * the first; publication of that complete pass is handled by GpuRenderer.
+ */
 void main()
 {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 
     if (any(greaterThanEqual(pixel, dimensions)))
         return;
+
     int index = pixel.y * dimensions.x + pixel.x;
     vec4 sum;
     TraceState s;
@@ -364,10 +434,8 @@ void main()
             {
                 float u = (float(pixel.x) + randomValue(rng)) / float(dimensions.x);
                 float v = (float(pixel.y) + randomValue(rng)) / float(dimensions.y);
-                initTrace(s,
-                          cameraOrigin,
-                          cameraCorner + u * cameraHorizontal + v * cameraVertical - cameraOrigin,
-                          rng);
+                initTrace(s, cameraOrigin,
+                          cameraCorner + u * cameraHorizontal + v * cameraVertical - cameraOrigin, rng);
             }
         }
 
@@ -383,12 +451,14 @@ void main()
             if (sum.w == 0)
             {
                 int body = s.body;
+
                 if (body < 0 && s.status == 3)
                     body = blackHole();
                 if (body >= 0 && materialKind(sphereMaterial(body)) == 6)
                     body = -1;
                 imageStore(bodyIds, pixel, ivec4(body));
             }
+
             sum += vec4(s.radiance, 1);
 
             if (testMode == 0)
@@ -407,6 +477,7 @@ void main()
     if (int(sum.w) < targetSamples)
         atomicAdd(activePixels, 1u);
     atomicAdd(completed, uint(sum.w));
+
     if (sum.w < 1.0)
         atomicAdd(missingFirstSample, 1u);
 }

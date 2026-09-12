@@ -79,6 +79,7 @@ namespace rt
         static int materialLayer(const int i, const int layer)
         {
             const auto t = scene->materials[i].layers;
+
             return layer == 0 ? t.x : layer == 1 ? t.y : layer == 2 ? t.z : t.w;
         }
 
@@ -90,6 +91,7 @@ namespace rt
         static vec3 materialEmission(const int i)
         {
             auto p = scene->materials[i].parameters;
+
             return {p.y, p.z, p.w};
         }
 
@@ -154,6 +156,7 @@ namespace rt
         static vec3 thermalTexel(const int i)
         {
             auto c = blackbodyTable()[static_cast<std::size_t>(i)];
+
             return {c.x, c.y, c.z};
         }
 
@@ -181,26 +184,33 @@ namespace rt
             const auto t = scene->textures[i].image;
             x = (x % t.y + t.y) % t.y;
             y = clamp(y, 0, t.z - 1);
+
             if (t.w == 0)
             {
                 auto c = scene->texels[t.x + x + y * t.y];
+
                 return {c.x, c.y, c.z};
             }
+
             const auto packed = scene->imageTexels[t.x + x + y * t.y];
             const float r = static_cast<float>(packed & 255u) / 255.f;
             const float g = static_cast<float>((packed >> 8) & 255u) / 255.f;
             const float b = static_cast<float>((packed >> 16) & 255u) / 255.f;
+
             return t.w == 1 ? vec3(decodeSrgb(r), decodeSrgb(g), decodeSrgb(b)) : vec3(r, g, b);
         }
 
         static vec3 imageValue(const int i, const real u, const real v)
         {
             const auto t = scene->textures[i].image;
+
             if (t.w == 0)
-                return imageTexel(i, clamp(static_cast<int>(u * t.y), 0, t.y - 1), clamp(static_cast<int>((1 - v) * t.z - 0.001), 0, t.z - 1));
+                return imageTexel(i, clamp(static_cast<int>(u * t.y), 0, t.y - 1),
+                                  clamp(static_cast<int>((1 - v) * t.z - 0.001), 0, t.z - 1));
             double x = u * t.y - 0.5, y = (1 - v) * t.z - 0.5;
             int ix = static_cast<int>(floor(x)), iy = static_cast<int>(floor(y));
             double fx = x - ix, fy = y - iy;
+
             return (1 - fy) * ((1 - fx) * imageTexel(i, ix, iy) + fx * imageTexel(i, ix + 1, iy)) +
                    fy * ((1 - fx) * imageTexel(i, ix, iy + 1) + fx * imageTexel(i, ix + 1, iy + 1));
         }
@@ -248,15 +258,15 @@ namespace rt
         thread_local bool picking = false;
         thread_local int pickedBody = -1;
 
-        #define INOUT(T) T&
-        #define OUT(T) T&
-        #include "../assets/shaders/TraceCore.inl"
-        #undef INOUT
-        #undef OUT
+#define INOUT(T) T &
+#define OUT(T) T &
+#include "../assets/shaders/TraceCore.inl"
+#undef INOUT
+#undef OUT
     } // namespace reference
 
-    RayResult traceCpu(const SceneData& scene, const RenderSettings& settings, const Vec3 &origin, const Vec3 &direction,
-                       const std::uint32_t seed)
+    RayResult traceCpu(const SceneData &scene, const RenderSettings &settings, const Vec3 &origin,
+                       const Vec3 &direction, const std::uint32_t seed)
     {
         reference::scene = &scene;
         reference::settings = &settings;
@@ -268,16 +278,18 @@ namespace rt
         return {s.radiance, s.p, s.v, s.status, s.attempts};
     }
 
-    int pickBody(const SceneData& scene, const RenderSettings& settings, const CameraData& camera, const double u,
-                 const double v)
+    int pickBody(const SceneData &scene, const RenderSettings &settings, const CameraData &camera,
+                 const double u, const double v)
     {
         const auto observer = observerSettings(scene, settings, camera);
         const auto basis = camera.basis(static_cast<double>(settings.width) / settings.height);
         reference::picking = true;
         reference::pickedBody = -1;
-        const auto result = traceCpu(scene, observer, basis[0], basis[1] + u * basis[2] + v * basis[3] - basis[0]);
+        const auto result =
+            traceCpu(scene, observer, basis[0], basis[1] + u * basis[2] + v * basis[3] - basis[0]);
         reference::picking = false;
         int body = reference::pickedBody;
+
         if (body < 0 && result.status == 3)
             for (int i = 0; i < static_cast<int>(scene.spheres.size()); ++i)
                 if (scene.materials[scene.spheres[i].material.x].kindTexture.x == Schwarzschild)
@@ -289,8 +301,8 @@ namespace rt
         return body;
     }
 
-    std::vector<Float4> renderCpu(const SceneData& scene, const RenderSettings& settings, const CameraData& camera,
-                                  std::uint64_t* failures)
+    std::vector<Float4> renderCpu(const SceneData &scene, const RenderSettings &settings,
+                                  const CameraData &camera, std::uint64_t* failures)
     {
         scene.validate();
         settings.validate();
@@ -308,12 +320,13 @@ namespace rt
 
                     for (int sample = 0; sample < settings.samples; ++sample)
                     {
-                        auto rng =
-                            reference::hashBits(static_cast<std::uint32_t>(y * settings.width + x) ^
-                                                reference::hashBits(static_cast<std::uint32_t>(sample) + settings.seed));
+                        auto rng = reference::hashBits(
+                            static_cast<std::uint32_t>(y * settings.width + x) ^
+                            reference::hashBits(static_cast<std::uint32_t>(sample) + settings.seed));
                         double u = (x + reference::randomValue(rng)) / settings.width,
                                v = (y + reference::randomValue(rng)) / settings.height;
-                        const auto result = traceCpu(scene, observer, basis[0], basis[1] + u * basis[2] + v * basis[3] - basis[0], rng);
+                        const auto result = traceCpu(scene, observer, basis[0],
+                                                     basis[1] + u * basis[2] + v * basis[3] - basis[0], rng);
                         color += result.color;
 
                         if (result.status == 2)
@@ -322,17 +335,20 @@ namespace rt
 
                     color = color / settings.samples;
                     pixels[static_cast<std::size_t>(y) * settings.width + x] = {
-                        static_cast<float>(color.x), static_cast<float>(color.y), static_cast<float>(color.z), static_cast<float>(settings.samples)};
+                        static_cast<float>(color.x), static_cast<float>(color.y), static_cast<float>(color.z),
+                        static_cast<float>(settings.samples)};
                 }
         };
         std::vector<std::thread> workers;
-        const unsigned count = std::min(static_cast<unsigned>(settings.height), std::max(1u, std::thread::hardware_concurrency()));
+        const unsigned count = std::min(static_cast<unsigned>(settings.height),
+                                        std::max(1u, std::thread::hardware_concurrency()));
 
         workers.reserve(count);
+
         for (unsigned i = 0; i < count; ++i)
             workers.emplace_back(worker);
 
-        for (auto& t : workers)
+        for (auto &t : workers)
             t.join();
 
         if (failures)
@@ -348,8 +364,10 @@ namespace rt
                 throw std::runtime_error("CPU core numerical check failed");
         };
         double t = 0;
-        require(reference::sphereRoot({0, 0, 3}, {0, 0, -1}, {0, 0, 0}, 1, 0, 100, t) && std::abs(t - 2) < 1e-12);
-        require(reference::sphereRoot({0, 0, 0}, {0, 0, 1}, {0, 0, 0}, 1, 0, 100, t) && std::abs(t - 1) < 1e-12);
+        require(reference::sphereRoot({0, 0, 3}, {0, 0, -1}, {0, 0, 0}, 1, 0, 100, t) &&
+                std::abs(t - 2) < 1e-12);
+        require(reference::sphereRoot({0, 0, 0}, {0, 0, 1}, {0, 0, 0}, 1, 0, 100, t) &&
+                std::abs(t - 1) < 1e-12);
         require(!reference::sphereRoot({0, 0, 3}, {0, 1, 0}, {0, 0, 0}, 1, 0, 100, t));
         require(reference::length(reference::safeUnit({0, 0, 0})) == 0);
 
@@ -394,7 +412,8 @@ namespace rt
         scene.imageTexels = {0x00808080u, 0x00ffffffu};
         scene.textures.push_back(packedImage);
         require(std::abs(reference::imageValue(4, 0.25, 0.5).x - decodeSrgb(128.f / 255.f)) < 1e-7);
-        require(reference::length(reference::imageValue(4, 0, 0.5) - reference::imageValue(4, 1, 0.5)) < 1e-12);
+        require(reference::length(reference::imageValue(4, 0, 0.5) - reference::imageValue(4, 1, 0.5)) <
+                1e-12);
         scene.textures[4].image.w = 2;
         require(std::abs(reference::imageValue(4, 0.25, 0.5).x - 128.0 / 255) < 1e-7);
 
@@ -452,7 +471,8 @@ namespace rt
         require(obscuredCity.color.x < cityLight.color.x * 0.2);
         auto day = traceCpu(layered, settings, {0, 0, 3}, {0, 0, -1});
         layered.materials[0].layers.x = -1;
-        require(reference::length(day.color - traceCpu(layered, settings, {0, 0, 3}, {0, 0, -1}).color) < 1e-12);
+        require(reference::length(day.color - traceCpu(layered, settings, {0, 0, 3}, {0, 0, -1}).color) <
+                1e-12);
         reference::scene = &scene;
         reference::settings = &settings;
 
@@ -468,14 +488,15 @@ namespace rt
         auto momentum = cross(observerRay.p, observerRay.v);
         double angularSquared = dot(momentum, momentum);
         double energySquared = observerRay.energy * observerRay.energy;
+
         for (int i = 0; i < 100; ++i)
         {
             double radius = reference::length(observerRay.p);
             require(std::abs(dot(observerRay.v, observerRay.v) - angularSquared / (radius * radius * radius) -
                              energySquared) < 1e-7);
             require(reference::length(cross(observerRay.p, observerRay.v) - momentum) < 1e-8);
-            reference::rk4(
-                observerRay.p, observerRay.v, 0.005, {0, 0, 0}, angularSquared, observerRay.p, observerRay.v);
+            reference::rk4(observerRay.p, observerRay.v, 0.005, {0, 0, 0}, angularSquared, observerRay.p,
+                           observerRay.v);
         }
     }
-}
+} // namespace rt

@@ -1,8 +1,30 @@
-// Compiled as GLSL, and included by the double-precision C++ reference.
-// The host supplies scene accessors, scalar/vector aliases, and INOUT/OUT.
+/**
+ * @file
+ * @brief Shared ray state machine and Schwarzschild geodesic integration.
+ * The GPU compiles this as GLSL float; CpuRenderer.cpp includes it with double-precision
+ * scalar/vector adapters. Keep random draws explicitly sequenced for reproducibility.
+ * Distances use horizon radii (r_s = 1). Integration follows a past-directed affine
+ * parameter, not coordinate time: v must not be normalized between accepted steps.
+ * Scene accessors and INOUT/OUT are supplied by the host. LightingCore.inl supplies
+ * emission and surface/volume shading. See docs/observer-and-horizon.md for derivations.
+ */
 const real PI = real(3.14159265358979323846);
 const real EPS = real(0.0001);
 
+/**
+ * @brief One resumable sample, preserved between bounded compute dispatches.
+ * p is world position; v is the past-directed spatial tangent dx/dlambda.
+ * throughput is the remaining RGB weight and radiance is accumulated linear light.
+ * h2 is squared angular momentum about the hole; step is an affine integration step.
+ * energy is the conserved future-photon Killing energy with camera frequency set to 1.
+ * observerLapse is a historical name: it stores energy for physical observers,
+ * the camera lapse for legacy rays, or 1 when frequency shifts are disabled.
+ * field is a sphere index while integrating, -1 outside, or -2 after an adaptive cutoff.
+ * attempts counts accepted AND rejected steps in the current traversal. depth bounds
+ * surface/field transitions. status: 0 active, 1 finished, 2 numerical failure,
+ * 3 captured/unavailable source or frame; the GPU also uses -1 to request a new sample.
+ * rng holds the deterministic random stream; body records the first visible surface.
+ */
 struct TraceState
 {
     vec3 p;
@@ -22,6 +44,10 @@ struct TraceState
     uint rng;
 };
 
+/**
+ * @brief Ray-segment intersection: parameter t, world point, outward normal, UVs, and sphere ID.
+ * t is a fraction for a segment direction, and a distance only for a unit direction.
+ */
 struct SurfaceHit
 {
     real t;
@@ -32,6 +58,9 @@ struct SurfaceHit
     int sphere;
 };
 
+/**
+ * @brief Normalize a vector, returning zero when its length is at most 1e-20.
+ */
 vec3 safeUnit(vec3 v)
 {
     real n = length(v);
@@ -39,6 +68,9 @@ vec3 safeUnit(vec3 v)
     return n > real(1e-20) ? v / n : vec3(0);
 }
 
+/**
+ * @brief Scramble a 32-bit key to seed independent pixel/sample random streams.
+ */
 uint hashBits(uint x)
 {
     x ^= x >> 16;
@@ -49,6 +81,9 @@ uint hashBits(uint x)
     return x ^ (x >> 16);
 }
 
+/**
+ * @brief Advance the 32-bit LCG and return its upper 24 bits scaled to [0,1).
+ */
 real randomValue(INOUT(uint) state)
 {
     state = 1664525u * state + 1013904223u;
@@ -56,6 +91,9 @@ real randomValue(INOUT(uint) state)
     return real(state >> 8) * real(1.0 / 16777216.0);
 }
 
+/**
+ * @brief Sample within the unit ball, limiting rejection attempts to 32 before returning zero.
+ */
 vec3 randomSphere(INOUT(uint) state)
 {
     for (int i = 0; i < 32; ++i)
@@ -73,11 +111,19 @@ vec3 randomSphere(INOUT(uint) state)
     return vec3(0);
 }
 
+/**
+ * @brief Check that all three components are finite using the host scalar predicate.
+ */
 bool finiteVector(vec3 v)
 {
     return finiteScalar(v.x) && finiteScalar(v.y) && finiteScalar(v.z);
 }
 
+/**
+ * @brief Return the nearest quadratic root strictly inside (lo,hi).
+ * The direction may be non-unit; zero directions are rejected and tangencies accepted.
+ * The output t is meaningful only when the function returns true.
+ */
 bool sphereRoot(vec3 p, vec3 v, vec3 center, real radius, real lo, real hi, OUT(real) t)
 {
     vec3 oc = p - center;
@@ -88,16 +134,22 @@ bool sphereRoot(vec3 p, vec3 v, vec3 center, real radius, real lo, real hi, OUT(
 
     if (a <= real(1e-30) || d < real(0))
         return false;
+
     real root = sqrt(d);
     t = (-b - root) / a;
 
     if (t > lo && t < hi)
         return true;
+
     t = (-b + root) / a;
 
     return t > lo && t < hi;
 }
 
+/**
+ * @brief Construct a world-space surface hit and equirectangular UV coordinates.
+ * Normalizing the distant environment normal keeps rounding from corrupting sky lookup.
+ */
 SurfaceHit makeHit(int sphere, vec3 p, vec3 v, real t)
 {
     SurfaceHit hit;
@@ -105,6 +157,7 @@ SurfaceHit makeHit(int sphere, vec3 p, vec3 v, real t)
     hit.p = p + t * v;
     hit.sphere = sphere;
     hit.normal = (hit.p - sphereCenter(sphere)) / sphereRadius(sphere);
+
     if (materialKind(sphereMaterial(sphere)) == 6)
         hit.normal = safeUnit(hit.normal);
     hit.u = real(1) - (atan(hit.normal.z, hit.normal.x) + PI) / (real(2) * PI);
@@ -113,6 +166,10 @@ SurfaceHit makeHit(int sphere, vec3 p, vec3 v, real t)
     return hit;
 }
 
+/**
+ * @brief Find the nearest sphere hit; solidsOnly skips the gravity-region boundary.
+ * The environment has a narrow outward rounding allowance to prevent missed sky hits.
+ */
 bool worldHit(vec3 p, vec3 v, real lo, real hi, bool solidsOnly, OUT(SurfaceHit) hit)
 {
     bool found = false;
@@ -121,6 +178,7 @@ bool worldHit(vec3 p, vec3 v, real lo, real hi, bool solidsOnly, OUT(SurfaceHit)
     {
         if (solidsOnly && materialKind(sphereMaterial(i)) == 4)
             continue;
+
         real t = real(0);
         bool intersects = sphereRoot(p, v, sphereCenter(i), sphereRadius(i), lo, hi, t);
 
@@ -133,6 +191,7 @@ bool worldHit(vec3 p, vec3 v, real lo, real hi, bool solidsOnly, OUT(SurfaceHit)
             vec3 relative = p - sphereCenter(i);
             real radius = sphereRadius(i);
             real roundingBand = real(8 * 1.1920928955078125e-7) * max(real(1), radius);
+
             if (abs(length(relative) - radius) <= roundingBand && dot(relative, v) > real(0))
             {
                 t = real(0);
@@ -151,6 +210,11 @@ bool worldHit(vec3 p, vec3 v, real lo, real hi, bool solidsOnly, OUT(SurfaceHit)
     return found;
 }
 
+/**
+ * @brief Evaluate indexed constant/checker/image textures without recursive calls.
+ * Scene validation guarantees an acyclic texture graph with at most 32 lookup levels.
+ * Image accessors decode color to linear light while leaving data maps linear.
+ */
 vec3 textureValue(int index, real u, real v, vec3 p)
 {
     for (int level = 0; level < 32; ++level)
@@ -174,6 +238,14 @@ vec3 textureValue(int index, real u, real v, vec3 p)
 
 #include "LightingCore.inl"
 
+/**
+ * @brief Initialize a primary ray, its random stream, and its observer-frame tangent.
+ * p is camera position and v initially points from the pixel toward the source.
+ * The arriving photon points along -v. Boost its unit camera frequency/momentum into
+ * the selected local frame, then reverse its coordinate tangent for backward tracing.
+ * Freely falling frames use ingoing Painleve-Gullstrand coordinates across the horizon;
+ * Hovering is valid only outside. Nonpositive-energy exterior-source rays terminate.
+ */
 void initTrace(OUT(TraceState) s, vec3 p, vec3 v, uint seed)
 {
     s.p = p;
@@ -205,16 +277,20 @@ void initTrace(OUT(TraceState) s, vec3 p, vec3 v, uint seed)
         vec3 flow = vec3(0);
         s.observerMode = 1;
         int hole = blackHole();
+
         if (hole >= 0)
         {
             vec3 relative = p - sphereCenter(hole);
             real radius = length(relative);
+
             if (radius <= real(1e-4))
             {
                 s.status = 3; // The singularity has no observer frame.
                 return;
             }
+
             flow = relative / (radius * sqrt(radius));
+
             if (radius <= real(1))
                 s.observerMode = 3;
         }
@@ -229,6 +305,7 @@ void initTrace(OUT(TraceState) s, vec3 p, vec3 v, uint seed)
         // coordinates. This remains finite on the future event horizon.
         s.v = flow * frequency - momentum;
         s.energy = frequency - dot(flow, momentum);
+
         if (hoveringObserver() && s.observerMode < 2)
         {
             real lapse = sqrt(max(real(1e-12), real(1) - dot(flow, flow)));
@@ -236,18 +313,29 @@ void initTrace(OUT(TraceState) s, vec3 p, vec3 v, uint seed)
             s.v = -(momentum + (lapse - real(1)) * dot(momentum, radial) * radial);
             s.energy = lapse * frequency;
         }
+
         s.observerLapse = redshiftEnabled() ? s.energy : real(1);
+
         if (s.energy <= real(0))
             s.status = 3; // No positive-energy exterior source on this past ray.
     }
 }
 
+/**
+ * @brief Terminate as a numerical failure and discard nonphysical accumulated radiance.
+ */
 void failTrace(INOUT(TraceState) s)
 {
     s.radiance = vec3(0);
     s.status = 2;
 }
 
+/**
+ * @brief Add terminal surface emission/lighting or choose the next scattering direction.
+ * Material IDs match MaterialKind in SceneData.h. Scattering occurs in the local static
+ * frame, then converts back to an affine tangent; stationary surfaces inside are invalid.
+ * CPU picking returns the first body without evaluating surface lighting.
+ */
 void scatterSurface(INOUT(TraceState) s, SurfaceHit hit)
 {
     if (s.body < 0)
@@ -257,6 +345,7 @@ void scatterSurface(INOUT(TraceState) s, SurfaceHit hit)
     {
         pickedBody = hit.sphere;
         s.status = 1;
+
         return;
     }
 #endif
@@ -279,6 +368,7 @@ void scatterSurface(INOUT(TraceState) s, SurfaceHit hit)
     {
         s.radiance += s.throughput * illuminateEarth(s, hit, color);
         s.status = 1;
+
         return;
     }
 
@@ -288,6 +378,7 @@ void scatterSurface(INOUT(TraceState) s, SurfaceHit hit)
 
         return;
     }
+
     ++s.depth;
     vec3 d = staticDirection(hit.p, s.v), n = hit.normal;
 
@@ -330,22 +421,27 @@ void scatterSurface(INOUT(TraceState) s, SurfaceHit hit)
     if (dot(s.v, s.v) < real(1e-20))
         s.v = n;
     s.p = hit.p + EPS * safeUnit(s.v);
+
     if (s.observerMode != 0)
     {
         vec3 radial = vec3(0);
         real lapse = real(1);
+
         if (blackHole() >= 0)
         {
             vec3 offset = hit.p - sphereCenter(blackHole());
             real radius = length(offset);
+
             if (radius <= real(1))
             {
                 s.status = 3; // Stationary material frames do not exist inside.
                 return;
             }
+
             radial = offset / radius;
             lapse = sqrt(real(1) - real(1) / radius);
         }
+
         s.v = s.energy / lapse * (s.v + (lapse - real(1)) * dot(s.v, radial) * radial);
     }
 
@@ -353,6 +449,10 @@ void scatterSurface(INOUT(TraceState) s, SurfaceHit hit)
     s.field = -1;
 }
 
+/**
+ * @brief Begin a gravity traversal and freeze h2 = |(p-center) cross v| squared.
+ * Resets the attempt counter and initial step; field entry also consumes a depth slot.
+ */
 void enterField(INOUT(TraceState) s, int field)
 {
     if (s.depth >= 50)
@@ -361,6 +461,7 @@ void enterField(INOUT(TraceState) s, int field)
 
         return;
     }
+
     ++s.depth;
     s.field = field;
     s.attempts = 0;
@@ -369,6 +470,11 @@ void enterField(INOUT(TraceState) s, int field)
     s.h2 = dot(angular, angular);
 }
 
+/**
+ * @brief Evaluate d2x/dlambda2 = -(3/2) h2 (x-center) / r^5, with r_s = 1.
+ * This is the Cartesian form of the Schwarzschild null-orbit equation. h2 remains
+ * constant on a free trajectory; the center-relative vector preserves translation invariance.
+ */
 vec3 acceleration(vec3 p, vec3 center, real h2)
 {
     vec3 r = p - center;
@@ -377,6 +483,11 @@ vec3 acceleration(vec3 p, vec3 center, real h2)
     return -real(1.5) * h2 * r / (r2 * r2 * sqrt(r2));
 }
 
+/**
+ * @brief Advance position and affine tangent with one classical fourth-order Runge-Kutta step.
+ * The intermediate accelerations sample the coupled system p' = v, v' = acceleration(p).
+ * This routine estimates no error; integrateField compares a full step against two half steps.
+ */
 void rk4(vec3 p, vec3 v, real dt, vec3 center, real h2, OUT(vec3) p1, OUT(vec3) v1)
 {
     vec3 a = acceleration(p, center, h2);
@@ -394,6 +505,11 @@ void rk4(vec3 p, vec3 v, real dt, vec3 center, real h2, OUT(vec3) p1, OUT(vec3) 
     v1 = v + dt / real(6) * (a + real(2) * b + real(2) * c + d);
 }
 
+/**
+ * @brief Test whether the remaining flight may be replaced by a straight segment.
+ * Bounds position and angular error using acceleration around the proposed path.
+ * This weak-field approximation does not guarantee identical grazing visibility.
+ */
 bool negligibleBending(TraceState s, real backgroundRadius)
 {
     // Bound acceleration in a tube around the proposed straight segment.
@@ -405,19 +521,23 @@ bool negligibleBending(TraceState s, real backgroundRadius)
     real speed = length(s.v);
     vec3 direction = safeUnit(s.v);
     real distance = real(0);
+
     if (!sphereRoot(s.p, direction, center, backgroundRadius, EPS, real(1e30), distance))
         return false;
 
     SurfaceHit hit;
+
     if (worldHit(s.p, direction, EPS, distance, true, hit))
         distance = hit.t;
     real diskDistance = real(0);
+
     if (diskHit(s.p, direction, EPS, distance, diskDistance))
         distance = diskDistance;
 
     vec3 relative = s.p - center;
     real closestT = clamp(-dot(relative, direction), real(0), distance);
     real closestRadius = length(relative + closestT * direction);
+
     if (closestRadius <= real(3) || speed <= real(1e-8))
         return false;
 
@@ -426,11 +546,22 @@ bool negligibleBending(TraceState s, real backgroundRadius)
     real duration = distance / speed;
     real displacement = real(0.5) * bound * duration * duration;
     real directionError = bound * duration / speed;
+
     return displacement < tubeRadius &&
            displacement <= absoluteTolerance() + relativeTolerance() * distance &&
            directionError <= relativeTolerance();
 }
 
+/**
+ * @brief Attempt one error-controlled RK4 step and process the nearest segment event.
+ * One full step and two half steps estimate error; dividing their difference by 15
+ * accounts for fourth-order step doubling. Both position and tangent errors must fit
+ * the absolute/relative tolerances. Rejected steps leave the ray at its previous point.
+ * Accepted chords are checked for surfaces, disk, capture, and fixed-region exit before
+ * committing a position. Step limits also bound chord error and resolve nearby geometry.
+ * Interior observers may cross the horizon outward while tracing into the past.
+ * A finite attempt budget and minimum step turn stalled/nonfinite paths into failures.
+ */
 void integrateField(INOUT(TraceState) s)
 {
     vec3 center = sphereCenter(s.field);
@@ -448,6 +579,7 @@ void integrateField(INOUT(TraceState) s)
 
         return;
     }
+
     ++s.attempts;
     real radius = length(s.p - center);
     real speed = max(length(s.v), real(1e-8));
@@ -455,10 +587,12 @@ void integrateField(INOUT(TraceState) s)
     // maxStep is the near-hole step scale. Far away, let steps grow smoothly
     // with radius, but never cross a large fraction of the radial scale at once.
     real stepLimit = maximumStep() / (s.observerMode != 0 ? max(real(1), speed) : real(1));
+
     if (integrationMode() != 0 || s.observerMode >= 2)
     {
         stepLimit = min(maximumStep() * max(real(1), radius * radius / real(9)), real(0.1) * radius / speed);
         real backgroundRadius = real(10);
+
         for (int i = 0; i < sphereCount(); ++i)
         {
             if (materialKind(sphereMaterial(i)) == 4)
@@ -480,6 +614,7 @@ void integrateField(INOUT(TraceState) s)
         {
             s.field = -2; // The remaining straight flight has passed the error check.
             s.v = safeUnit(s.v);
+
             return;
         }
 
@@ -493,6 +628,7 @@ void integrateField(INOUT(TraceState) s)
             s.radiance += skyShift * s.throughput *
                           ((real(1) - sky) * vec3(1) + sky * vec3(real(0.5), real(0.7), real(1)));
             s.status = 1;
+
             return;
         }
 
@@ -502,6 +638,7 @@ void integrateField(INOUT(TraceState) s)
         real chordTolerance = absoluteTolerance() + relativeTolerance() * max(real(1), radius);
         stepLimit = min(stepLimit, sqrt(real(8) * chordTolerance / max(curvature, real(1e-20))));
     }
+
     s.step = min(s.step, stepLimit);
     vec3 pf, vf, ph, vh, pn, vn;
     rk4(s.p, s.v, s.step, center, s.h2, pf, vf);
@@ -593,6 +730,7 @@ void integrateField(INOUT(TraceState) s)
         {
             pickedBody = blackHole();
             s.status = 1;
+
             return;
         }
 #endif
@@ -612,6 +750,11 @@ void integrateField(INOUT(TraceState) s)
     }
 }
 
+/**
+ * @brief Perform one state-machine action without tracing an entire trajectory.
+ * Resume integration, enter a field, shade the nearest straight-flight event, or finish
+ * on the background. The GPU calls this at most 64 times per dispatch and stores state.
+ */
 void advanceTrace(INOUT(TraceState) s)
 {
     if (s.status != 0)
@@ -659,6 +802,7 @@ void advanceTrace(INOUT(TraceState) s)
         {
             pickedBody = blackHole();
             s.status = 1;
+
             return;
         }
 #endif
@@ -666,6 +810,7 @@ void advanceTrace(INOUT(TraceState) s)
             s.body = blackHole();
         s.radiance += s.throughput * diskRadiance(s.p, -s.v, s.observerLapse);
         s.status = 1;
+
         return;
     }
 

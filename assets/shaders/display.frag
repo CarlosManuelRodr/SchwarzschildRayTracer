@@ -1,9 +1,20 @@
+/**
+ * @file
+ * @brief Convert the published linear accumulation texture into opaque sRGB output.
+ * The host disables GL_FRAMEBUFFER_SRGB because this shader encodes sRGB explicitly.
+ * Keep the bloom, exposure, and tone curve consistent with SceneData.cpp PNG conversion.
+ */
 #version 430 core
 in vec2 uv;
 out vec4 color;
 uniform sampler2D accumulation;
 uniform float exposure;
 
+/**
+ * @brief Average completed samples, add a small highlight bloom, then tone-map and encode.
+ * A 5x5 binomial kernel at four-pixel spacing gathers excess luminance above 1.
+ * The rational filmic curve compresses HDR into [0,1]; the sRGB transfer follows last.
+ */
 void main()
 {
     vec4 sum = texture(accumulation, uv);
@@ -28,7 +39,7 @@ void main()
 
     hdr += 0.08 * bloom;
     vec3 linear = clamp((hdr * (2.51 * hdr + 0.03)) / (hdr * (2.43 * hdr + 0.59) + 0.14), 0.0, 1.0);
-    vec3 srgb = mix(
-        1.055 * pow(linear, vec3(1.0 / 2.4)) - 0.055, 12.92 * linear, lessThanEqual(linear, vec3(0.0031308)));
+    vec3 srgb = mix(1.055 * pow(linear, vec3(1.0 / 2.4)) - 0.055, 12.92 * linear,
+                    lessThanEqual(linear, vec3(0.0031308)));
     color = vec4(srgb, 1);
 }
