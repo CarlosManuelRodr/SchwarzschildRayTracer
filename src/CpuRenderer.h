@@ -11,7 +11,7 @@ struct RayResult
 };
 
 RayResult traceCpu(
-    const SceneData&, const RenderSettings&, Vec3 origin, Vec3 direction, std::uint32_t seed = 1);
+    const SceneData&, const RenderSettings&, const Vec3 &origin, const Vec3 &direction, std::uint32_t seed = 1);
 std::vector<Float4> renderCpu(const SceneData&,
                               const RenderSettings&,
                               const CameraData&,

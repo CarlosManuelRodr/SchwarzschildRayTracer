@@ -11,6 +11,7 @@ namespace rt
     {
         using real = double;
         using vec3 = Vec3;
+        // ReSharper disable once CppTypeAliasNeverUsed
         using uint = std::uint32_t;
         using std::abs;
         using std::asin;
@@ -25,17 +26,17 @@ namespace rt
         using std::sin;
         using std::sqrt;
 
-        real atan(real y, real x)
+        static real atan(const real y, const real x)
         {
             return std::atan2(y, x);
         }
 
-        real length(vec3 v)
+        static real length(const vec3 &v)
         {
             return std::sqrt(dot(v, v));
         }
 
-        bool finiteScalar(real v)
+        static bool finiteScalar(const real v)
         {
             return std::isfinite(v);
         }
@@ -43,56 +44,56 @@ namespace rt
         thread_local const SceneData* scene;
         thread_local const RenderSettings* settings;
 
-        int sphereCount()
+        static int sphereCount()
         {
-            return int(scene->spheres.size());
+            return static_cast<int>(scene->spheres.size());
         }
 
-        vec3 sphereCenter(int i)
+        static vec3 sphereCenter(const int i)
         {
             auto c = scene->spheres[i].centerRadius;
 
             return {c.x, c.y, c.z};
         }
 
-        real sphereRadius(int i)
+        static real sphereRadius(const int i)
         {
             return scene->spheres[i].centerRadius.w;
         }
 
-        int sphereMaterial(int i)
+        static int sphereMaterial(const int i)
         {
             return scene->spheres[i].material.x;
         }
 
-        int materialKind(int i)
+        static int materialKind(const int i)
         {
             return scene->materials[i].kindTexture.x;
         }
 
-        int materialTexture(int i)
+        static int materialTexture(const int i)
         {
             return scene->materials[i].kindTexture.y;
         }
 
-        int materialLayer(int i, int layer)
+        static int materialLayer(const int i, const int layer)
         {
-            auto t = scene->materials[i].layers;
+            const auto t = scene->materials[i].layers;
             return layer == 0 ? t.x : layer == 1 ? t.y : layer == 2 ? t.z : t.w;
         }
 
-        real materialParameter(int i)
+        static real materialParameter(const int i)
         {
             return scene->materials[i].parameters.x;
         }
 
-        vec3 materialEmission(int i)
+        static vec3 materialEmission(const int i)
         {
             auto p = scene->materials[i].parameters;
             return {p.y, p.z, p.w};
         }
 
-        int blackHole()
+        static int blackHole()
         {
             for (int i = 0; i < sphereCount(); ++i)
                 if (materialKind(sphereMaterial(i)) == Schwarzschild)
@@ -101,7 +102,7 @@ namespace rt
             return -1;
         }
 
-        int planet()
+        static int planet()
         {
             for (int i = 0; i < sphereCount(); ++i)
                 if (materialKind(sphereMaterial(i)) == Earth)
@@ -110,74 +111,74 @@ namespace rt
             return -1;
         }
 
-        bool diskEnabled()
+        static bool diskEnabled()
         {
             return scene->disk.enabled;
         }
 
-        vec3 diskNormal()
+        static vec3 diskNormal()
         {
             return normalized(scene->disk.normal);
         }
 
-        real diskInner()
+        static real diskInner()
         {
             return scene->disk.innerRadius;
         }
 
-        real diskOuter()
+        static real diskOuter()
         {
             return scene->disk.outerRadius;
         }
 
-        real diskPeakTemperature()
+        static real diskPeakTemperature()
         {
             return scene->disk.peakTemperature;
         }
 
-        real diskScale()
+        static real diskScale()
         {
             return scene->disk.emissionScale;
         }
 
-        real atmosphereHeight()
+        static real atmosphereHeight()
         {
             return scene->atmosphereHeight;
         }
 
-        bool redshiftEnabled()
+        static bool redshiftEnabled()
         {
             return settings->redshift;
         }
 
-        vec3 thermalTexel(int i)
+        static vec3 thermalTexel(const int i)
         {
-            auto c = blackbodyTable()[std::size_t(i)];
+            auto c = blackbodyTable()[static_cast<std::size_t>(i)];
             return {c.x, c.y, c.z};
         }
 
-        int textureKind(int i)
+        static int textureKind(const int i)
         {
             return scene->textures[i].kindChildren.x;
         }
 
-        int textureChild(int i, bool odd)
+        static int textureChild(const int i, const bool odd)
         {
-            auto t = scene->textures[i].kindChildren;
+            const auto t = scene->textures[i].kindChildren;
 
             return odd ? t.y : t.z;
         }
 
-        vec3 textureColor(int i)
+        static vec3 textureColor(const int i)
         {
             auto c = scene->textures[i].color;
 
             return {c.x, c.y, c.z};
         }
 
-        vec3 imageTexel(int i, int x, int y)
+        static vec3 imageTexel(const int i, int x, int y)
         {
-            auto t = scene->textures[i].image;
+            const auto t = scene->textures[i].image;
             x = (x % t.y + t.y) % t.y;
             y = clamp(y, 0, t.z - 1);
             if (t.w == 0)
@@ -185,61 +186,61 @@ namespace rt
                 auto c = scene->texels[t.x + x + y * t.y];
                 return {c.x, c.y, c.z};
             }
-            auto packed = scene->imageTexels[t.x + x + y * t.y];
-            float r = (packed & 255u) / 255.f;
-            float g = ((packed >> 8) & 255u) / 255.f;
-            float b = ((packed >> 16) & 255u) / 255.f;
+            const auto packed = scene->imageTexels[t.x + x + y * t.y];
+            const float r = static_cast<float>(packed & 255u) / 255.f;
+            const float g = static_cast<float>((packed >> 8) & 255u) / 255.f;
+            const float b = static_cast<float>((packed >> 16) & 255u) / 255.f;
             return t.w == 1 ? vec3(decodeSrgb(r), decodeSrgb(g), decodeSrgb(b)) : vec3(r, g, b);
         }
 
-        vec3 imageValue(int i, real u, real v)
+        static vec3 imageValue(const int i, const real u, const real v)
         {
-            auto t = scene->textures[i].image;
+            const auto t = scene->textures[i].image;
             if (t.w == 0)
-                return imageTexel(i, clamp(int(u * t.y), 0, t.y - 1), clamp(int((1 - v) * t.z - 0.001), 0, t.z - 1));
+                return imageTexel(i, clamp(static_cast<int>(u * t.y), 0, t.y - 1), clamp(static_cast<int>((1 - v) * t.z - 0.001), 0, t.z - 1));
             double x = u * t.y - 0.5, y = (1 - v) * t.z - 0.5;
-            int ix = int(floor(x)), iy = int(floor(y));
+            int ix = static_cast<int>(floor(x)), iy = static_cast<int>(floor(y));
             double fx = x - ix, fy = y - iy;
             return (1 - fy) * ((1 - fx) * imageTexel(i, ix, iy) + fx * imageTexel(i, ix + 1, iy)) +
                    fy * ((1 - fx) * imageTexel(i, ix, iy + 1) + fx * imageTexel(i, ix + 1, iy + 1));
         }
 
-        real maximumStep()
+        static real maximumStep()
         {
             return settings->maxStep;
         }
 
-        int integrationMode()
+        static int integrationMode()
         {
-            return int(settings->integrationMode);
+            return static_cast<int>(settings->integrationMode);
         }
 
-        vec3 observerVelocity()
+        static vec3 observerVelocity()
         {
             return settings->observerVelocity;
         }
 
-        bool observerFrameEnabled()
+        static bool observerFrameEnabled()
         {
             return settings->useObserverFrame;
         }
 
-        bool hoveringObserver()
+        static bool hoveringObserver()
         {
             return settings->observerType == RenderSettings::Hovering;
         }
 
-        real relativeTolerance()
+        static real relativeTolerance()
         {
             return settings->relativeTolerance;
         }
 
-        real absoluteTolerance()
+        static real absoluteTolerance()
         {
             return settings->absoluteTolerance;
         }
 
-        int maximumAttempts()
+        static int maximumAttempts()
         {
             return settings->maxIntegrationAttempts;
         }
@@ -254,8 +255,8 @@ namespace rt
         #undef OUT
     } // namespace reference
 
-    RayResult traceCpu(
-        const SceneData& scene, const RenderSettings& settings, Vec3 origin, Vec3 direction, std::uint32_t seed)
+    RayResult traceCpu(const SceneData& scene, const RenderSettings& settings, const Vec3 &origin, const Vec3 &direction,
+                       const std::uint32_t seed)
     {
         reference::scene = &scene;
         reference::settings = &settings;
@@ -267,36 +268,36 @@ namespace rt
         return {s.radiance, s.p, s.v, s.status, s.attempts};
     }
 
-    int pickBody(
-        const SceneData& scene, const RenderSettings& settings, const CameraData& camera, double u, double v)
+    int pickBody(const SceneData& scene, const RenderSettings& settings, const CameraData& camera, const double u,
+                 const double v)
     {
-        auto observer = observerSettings(scene, settings, camera);
-        auto basis = camera.basis(double(settings.width) / settings.height);
+        const auto observer = observerSettings(scene, settings, camera);
+        const auto basis = camera.basis(static_cast<double>(settings.width) / settings.height);
         reference::picking = true;
         reference::pickedBody = -1;
-        auto result = traceCpu(scene, observer, basis[0], basis[1] + u * basis[2] + v * basis[3] - basis[0]);
+        const auto result = traceCpu(scene, observer, basis[0], basis[1] + u * basis[2] + v * basis[3] - basis[0]);
         reference::picking = false;
         int body = reference::pickedBody;
         if (body < 0 && result.status == 3)
-            for (int i = 0; i < int(scene.spheres.size()); ++i)
+            for (int i = 0; i < static_cast<int>(scene.spheres.size()); ++i)
                 if (scene.materials[scene.spheres[i].material.x].kindTexture.x == Schwarzschild)
                     body = i;
+
         if (body >= 0 && scene.materials[scene.spheres[body].material.x].kindTexture.x == Environment)
             return -1;
+
         return body;
     }
 
-    std::vector<Float4> renderCpu(const SceneData& scene,
-                                  const RenderSettings& settings,
-                                  const CameraData& camera,
+    std::vector<Float4> renderCpu(const SceneData& scene, const RenderSettings& settings, const CameraData& camera,
                                   std::uint64_t* failures)
     {
         scene.validate();
         settings.validate();
-        auto basis = camera.basis(double(settings.width) / settings.height);
-        auto observer = observerSettings(scene, settings, camera);
-        std::vector<Float4> pixels(std::size_t(settings.width) * settings.height);
-        std::atomic<int> row{0};
+        const auto basis = camera.basis(static_cast<double>(settings.width) / settings.height);
+        const auto observer = observerSettings(scene, settings, camera);
+        std::vector<Float4> pixels(static_cast<std::size_t>(settings.width) * settings.height);
+        std::atomic row{0};
         std::atomic<std::uint64_t> bad{0};
         auto worker = [&]
         {
@@ -308,12 +309,11 @@ namespace rt
                     for (int sample = 0; sample < settings.samples; ++sample)
                     {
                         auto rng =
-                            reference::hashBits(std::uint32_t(y * settings.width + x) ^
-                                                reference::hashBits(std::uint32_t(sample) + settings.seed));
+                            reference::hashBits(static_cast<std::uint32_t>(y * settings.width + x) ^
+                                                reference::hashBits(static_cast<std::uint32_t>(sample) + settings.seed));
                         double u = (x + reference::randomValue(rng)) / settings.width,
                                v = (y + reference::randomValue(rng)) / settings.height;
-                        auto result = traceCpu(
-                            scene, observer, basis[0], basis[1] + u * basis[2] + v * basis[3] - basis[0], rng);
+                        const auto result = traceCpu(scene, observer, basis[0], basis[1] + u * basis[2] + v * basis[3] - basis[0], rng);
                         color += result.color;
 
                         if (result.status == 2)
@@ -321,13 +321,14 @@ namespace rt
                     }
 
                     color = color / settings.samples;
-                    pixels[std::size_t(y) * settings.width + x] = {
-                        float(color.x), float(color.y), float(color.z), float(settings.samples)};
+                    pixels[static_cast<std::size_t>(y) * settings.width + x] = {
+                        static_cast<float>(color.x), static_cast<float>(color.y), static_cast<float>(color.z), static_cast<float>(settings.samples)};
                 }
         };
         std::vector<std::thread> workers;
-        unsigned count = std::min(unsigned(settings.height), std::max(1u, std::thread::hardware_concurrency()));
+        const unsigned count = std::min(static_cast<unsigned>(settings.height), std::max(1u, std::thread::hardware_concurrency()));
 
+        workers.reserve(count);
         for (unsigned i = 0; i < count; ++i)
             workers.emplace_back(worker);
 
@@ -341,7 +342,7 @@ namespace rt
 
     void runCoreTests()
     {
-        auto require = [](bool ok)
+        auto require = [](const bool ok)
         {
             if (!ok)
                 throw std::runtime_error("CPU core numerical check failed");
@@ -431,7 +432,7 @@ namespace rt
         auto source = reference::makeHit(0, {0, 0, 8}, {0, 0, 1}, 0);
         auto centerLight = reference::surfaceRadiance(source, {0, 0, 1}, 1);
         auto limbLight = reference::surfaceRadiance(source, {1, 0, 0}, 1);
-        require(std::abs(limbLight.y / centerLight.y - (1.0 - double(0.6f))) < 1e-6);
+        require(std::abs(limbLight.y / centerLight.y - (1.0 - static_cast<double>(0.6f))) < 1e-6);
         require(toneMap(100) >= toneMap(10) && toneMap(10) > toneMap(1));
 
         // An unlit hemisphere emits city lights; clouds attenuate them. Daylight
