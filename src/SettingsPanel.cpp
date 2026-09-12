@@ -41,7 +41,8 @@ SettingsPanel::~SettingsPanel()
 void SettingsPanel::processEvent(const SDL_Event& event)
 {
     ImGui_ImplSDL3_ProcessEvent(&event);
-    if (editingEnabled) processGizmoEvent(event);
+    if (editingEnabled)
+        processGizmoEvent(event);
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_F1)
     {
         visible = !visible;
@@ -164,9 +165,10 @@ PanelActions SettingsPanel::draw(double& slowStep,
             ImGui::PopStyleColor();
         }
         if (ImGui::CollapsingHeader("Controls"))
-            ImGui::TextWrapped("Click a body: select. Drag gizmo: move body. Left-drag elsewhere: look. WASD "
-                               "/ arrows: move. Q / E: up / down. Shift: precision. P: "
-                               "save PNG. Escape: exit.");
+            ImGui::TextWrapped(
+                "Click a body: select. Drag gizmo: move body. Left/right-drag elsewhere: look. WASD "
+                "/ arrows: move. Q / E: up / down. Shift: precision. P: "
+                "save PNG. Escape: exit.");
     }
     ImGui::End();
     ImGui::SetNextWindowPos(ImVec2(std::max(12.0f, display.x - 370.0f * uiScale), 12),

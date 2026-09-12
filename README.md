@@ -90,7 +90,7 @@ IDs, including observer aberration and gravitational lensing. With multiple lens
 images, the largest connected image is used. Arrows remain world-axis editing
 directions, not bent light rays. Invisible bodies have no gizmo but remain editable
 through the panel. Anchors update only when a complete new view is displayed.
-Left-drag elsewhere still rotates the camera. F1 hides the panels and gizmo.
+Left-drag elsewhere or right-drag rotates the camera. Right-drag never selects or moves bodies. F1 hides the panels and gizmo.
 Moving the black hole also moves its accretion disk and gravity field. Other bodies
 move independently. Scene edits restart progressive rendering without reloading textures.
 

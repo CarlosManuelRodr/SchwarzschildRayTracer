@@ -197,7 +197,8 @@ int main(int argc, char** argv)
                     << "  --exposure N | --no-redshift\n"
                     << "  --slow-step N (Shift movement per tap; default 0.0005; held speed 20*N units/s)\n"
                     << "  --full-scene-integration | --adaptative (default: fixed radius)\n"
-                    << "Left-drag looks; arrows/WASD move; Q/E rise/descend; P saves; F1 toggles settings; "
+                    << "Left/right-drag looks; arrows/WASD move; Q/E rise/descend; P saves; F1 toggles "
+                       "settings; "
                        "Escape exits.\n";
                 return 0;
             }
@@ -259,12 +260,13 @@ int main(int argc, char** argv)
         renderer.reset(settings, camera);
         rt::SettingsPanel panel(window.get(), settings);
         rt::Timeline timeline(scene, camera);
-        std::cout
-            << "GPU: " << renderer.device()
-            << "\nLeft-drag to look; arrows/WASD move; Q/E rise/descend; P saves; F1 toggles settings.\n";
+        std::cout << "GPU: " << renderer.device()
+                  << "\nLeft/right-drag to look; arrows/WASD move; Q/E rise/descend; P saves; F1 toggles "
+                     "settings.\n";
         bool running = true, minimized = false;
         bool focused = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS) != 0;
         bool dragging = false;
+        Uint8 lookButton = 0;
         SDL_FPoint mousePosition{}, clickPosition{};
         bool lookMoved = false;
         bool geometryDirty = false;
@@ -323,17 +325,20 @@ int main(int argc, char** argv)
                 if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED)
                     focused = true;
 
-                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT &&
-                    focused && !minimized && !captureMouse)
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+                    (event.button.button == SDL_BUTTON_LEFT || event.button.button == SDL_BUTTON_RIGHT) &&
+                    focused && !minimized && !captureMouse && !dragging)
                 {
                     dragging = true;
+                    lookButton = event.button.button;
                     mousePosition = {event.button.x, event.button.y};
                     clickPosition = mousePosition;
-                    lookMoved = false;
+                    lookMoved = lookButton == SDL_BUTTON_RIGHT;
                 }
 
                 if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT &&
-                    dragging && !lookMoved && !captureMouse && focused && !minimized)
+                    dragging && lookButton == SDL_BUTTON_LEFT && !lookMoved && !captureMouse && focused &&
+                    !minimized)
                 {
                     int width = 0, height = 0;
                     rt::checkSdl(SDL_GetWindowSize(window.get(), &width, &height), "Get picking viewport");
@@ -342,7 +347,7 @@ int main(int argc, char** argv)
                             renderer.pickDisplayed(event.button.x / width, 1.0 - event.button.y / height));
                 }
 
-                if ((event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT) ||
+                if ((event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == lookButton) ||
                     event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE)
                     dragging = false;
 
