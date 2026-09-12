@@ -1,4 +1,5 @@
 #include "Animation.h"
+#include "Viewport.h"
 #include "FrameExport.h"
 #include "GpuRenderer.h"
 #include "SdlSupport.h"
@@ -205,6 +206,27 @@ void verifyVideo(const std::filesystem::path& path, int width, int height, int f
 
 int runAnimationTests()
 {
+    ViewportRect area{100, 50, 800, 600};
+    auto wide = area.fit(2.0);
+    require(wide.x == 100 && wide.y == 150 && wide.width == 800 && wide.height == 400,
+            "Viewport must letterbox fixed aspect ratios");
+    require(!wide.contains(200, 100) && wide.contains(500, 350),
+            "Picking must exclude letterboxing and panels");
+    auto uv = wide.imagePoint(300, 250);
+    require(uv.x == 0.25 && uv.y == 0.75,
+            "Viewport picking must use its offset and bottom-up image coordinates");
+    require(area.pixels(1.5f, 2.f) == std::array<int, 2>{1200, 1200},
+            "Viewport resolution must use framebuffer DPI scaling");
+    auto tall = area.fit(0.5);
+    require(tall.x == 350 && tall.width == 300 && tall.height == 600, "Portrait images must be pillarboxed");
+    auto velocity = editObserverComponent({0.2, 0.6, 0.3}, 0, -0.999);
+    require(velocity.x < 0 && velocity.y == 0.6 && velocity.z == 0.3 &&
+                std::abs(dot(velocity, velocity) - 0.999 * 0.999) < 1e-12,
+            "Signed velocity editing must preserve other axes and cap combined speed");
+    velocity = editObserverComponent(velocity, 0, 0);
+    require(velocity.x == 0 && velocity.y == 0.6 && velocity.z == 0.3,
+            "Velocity zero must be exact and preserve other axes");
+
     auto scene = fixture();
     CameraData camera;
     AnimationEditor e(scene, camera);

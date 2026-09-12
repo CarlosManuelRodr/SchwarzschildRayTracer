@@ -82,7 +82,7 @@ class Timeline
     };
 
     std::shared_ptr<DialogResult> dialogResult;
-    bool dialogPending = false, reopenExport = false, refreshAfterDialog = false;
+    bool dialogPending = false, reopenExport = false, refreshAfterDialog = false, requestExport = false;
     void chooseDestination(SDL_Window* window);
     void receiveDestination();
     int format = 1, width = 1920, height = 1080, samples = 30;

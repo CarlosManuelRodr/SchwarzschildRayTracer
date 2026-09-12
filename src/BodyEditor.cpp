@@ -46,8 +46,7 @@ void SettingsPanel::selectBody(int body)
     ++bodySelectionRevision;
     selectedBody = body;
     editorOpen = body >= 0;
-    if (editorOpen)
-        visible = true;
+    cameraSelected = false;
     dragAxis = -1;
     gizmoVisible = false;
     bodyEditPending = false;
@@ -62,7 +61,7 @@ void SettingsPanel::processGizmoEvent(const SDL_Event& event)
         gizmoVisible = false;
     }
     if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT && visible &&
-        gizmoVisible && !ImGui::GetIO().WantCaptureMouse)
+        gizmoVisible && viewportHovered && imageRect.contains(event.button.x, event.button.y))
     {
         SDL_FPoint point{event.button.x, event.button.y};
         float nearest = 9 * uiScale;
@@ -118,15 +117,43 @@ void SettingsPanel::processGizmoEvent(const SDL_Event& event)
 void SettingsPanel::drawBodyEditor(PanelActions& actions,
                                    const CameraData& camera,
                                    const SceneData& scene,
-                                   double aspect)
+                                   double)
 {
     if (originalBodyPositions.empty())
         for (auto sphere : scene.spheres)
             originalBodyPositions.push_back(
                 {sphere.centerRadius.x, sphere.centerRadius.y, sphere.centerRadius.z});
     gizmoVisible = false;
-    if (!editorOpen || selectedBody < 0 || selectedBody >= int(scene.spheres.size()))
+    if (selectedBody < 0 || selectedBody >= int(scene.spheres.size()))
+    {
+        if (!panels[1])
+            return;
+        if (ImGui::Begin("Inspector", nullptr, lockedLayout ? ImGuiWindowFlags_NoMove : 0))
+        {
+            if (cameraSelected)
+            {
+                ImGui::SeparatorText("Camera position");
+                double values[] = {camera.position.x, camera.position.y, camera.position.z};
+                const char* axes[] = {"X", "Y", "Z"};
+                for (int i = 0; i < 3; ++i)
+                {
+                    ImGui::SetNextItemWidth(-36 * uiScale);
+                    if (ImGui::InputDouble(axes[i], &values[i], 0, 0, "%.8g") &&
+                        finitePosition({values[0], values[1], values[2]}))
+                    {
+                        actions.positionChanged = true;
+                        actions.position = {values[0], values[1], values[2]};
+                    }
+                }
+                if (ImGui::Button("Reset camera pose"))
+                    actions.resetCamera = true;
+            }
+            else
+                ImGui::TextWrapped("Select an object in the scene or viewport to edit its position.");
+        }
+        ImGui::End();
         return;
+    }
     auto sphere = scene.spheres[selectedBody];
     displayedBodyPosition = {sphere.centerRadius.x, sphere.centerRadius.y, sphere.centerRadius.z};
     if (bodyEditPending)
@@ -136,59 +163,45 @@ void SettingsPanel::drawBodyEditor(PanelActions& actions,
         displayedBodyPosition = pendingBodyPosition;
         bodyEditPending = false;
     }
-    auto display = ImGui::GetIO().DisplaySize;
-    ImGui::SetNextWindowPos(ImVec2(12,
-                                   std::max(12.0f,
-                                            display.y -
-                                                (6 * ImGui::GetFrameHeightWithSpacing() +
-                                                 6 * (ImGui::GetFrameHeight() + 6) + 52) -
-                                                250 * uiScale)),
-                            ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(350 * uiScale, 225 * uiScale), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Body transform", &editorOpen))
+    if (!panels[1])
+        return;
+    if (ImGui::Begin("Inspector", nullptr, lockedLayout ? ImGuiWindowFlags_NoMove : 0))
     {
-        if (ImGui::BeginCombo("Selected", bodyName(scene, selectedBody)))
+        ImGui::SeparatorText(bodyName(scene, selectedBody));
+        double position[] = {displayedBodyPosition.x, displayedBodyPosition.y, displayedBodyPosition.z};
+        const char* axes[] = {"X", "Y", "Z"};
+        for (int i = 0; i < 3; ++i)
         {
-            for (int i = 0; i < int(scene.spheres.size()); ++i)
-            {
-                if (scene.materials[scene.spheres[i].material.x].kindTexture.x == Environment)
-                    continue;
-                ImGui::PushID(i);
-                if (ImGui::Selectable(bodyName(scene, i), selectedBody == i))
-                    selectBody(i);
-                ImGui::PopID();
-            }
-            ImGui::EndCombo();
-        }
-        auto current = scene.spheres[selectedBody].centerRadius;
-        double position[] = {current.x, current.y, current.z};
-        if (ImGui::InputScalarN("Position XYZ", ImGuiDataType_Double, position, 3, nullptr, nullptr, "%.8g"))
-        {
-            Vec3 value{position[0], position[1], position[2]};
-            if (finitePosition(value))
+            ImGui::SetNextItemWidth(-36 * uiScale);
+            if (ImGui::InputDouble(axes[i], &position[i], 0, 0, "%.8g") &&
+                finitePosition({position[0], position[1], position[2]}))
             {
                 actions.body = selectedBody;
-                actions.bodyPosition = value;
+                actions.bodyPosition = {position[0], position[1], position[2]};
             }
-            else
-                ImGui::TextWrapped("Coordinates must be finite.");
         }
         if (ImGui::Button("Reset position"))
         {
             actions.body = selectedBody;
             actions.bodyPosition = originalBodyPositions[selectedBody];
         }
-        ImGui::TextWrapped(
-            "Drag X / Y / Z arrows to move on a world axis. Drag the center to move in the view plane.");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Restore this body's original scene position.");
         if (scene.materials[scene.spheres[selectedBody].material.x].kindTexture.x == Schwarzschild)
-            ImGui::TextWrapped("The disk and gravity field follow the black hole.");
+            ImGui::TextDisabled("Disk and gravity follow this position.");
     }
     ImGui::End();
-    if (!editorOpen)
-    {
-        dragAxis = -1;
+}
+
+void SettingsPanel::drawGizmo(const PanelActions& actions,
+                              const CameraData& camera,
+                              const SceneData& scene,
+                              double aspect)
+{
+    if (!visible || !showGizmos || !editingEnabled || selectedBody < 0 ||
+        selectedBody >= int(scene.spheres.size()))
         return;
-    }
+    ImVec2 display{imageRect.width, imageRect.height};
     auto selected = scene.spheres[selectedBody].centerRadius;
     displayedBodyPosition =
         actions.body == selectedBody ? actions.bodyPosition : Vec3(selected.x, selected.y, selected.z);
@@ -218,21 +231,24 @@ void SettingsPanel::drawBodyEditor(PanelActions& actions,
         double z = dot(offset, forward);
         if (z <= 1e-4)
             return SDL_FPoint{-100000, -100000};
-        return SDL_FPoint{float(display.x * (0.5 + dot(offset, gizmoRight) / (2 * z * tanHalf * aspect))),
-                          float(display.y * (0.5 - dot(offset, gizmoUp) / (2 * z * tanHalf)))};
+        return SDL_FPoint{
+            float(imageRect.x + display.x * (0.5 + dot(offset, gizmoRight) / (2 * z * tanHalf * aspect))),
+            float(imageRect.y + display.y * (0.5 - dot(offset, gizmoUp) / (2 * z * tanHalf)))};
     };
     SDL_FPoint geometricOrigin = project(displayedBodyPosition);
-    gizmoOrigin = anchored ? SDL_FPoint{float(bodyAnchors[selectedBody].x * display.x),
-                                        float((1 - bodyAnchors[selectedBody].y) * display.y)}
+    gizmoOrigin = anchored ? SDL_FPoint{float(imageRect.x + bodyAnchors[selectedBody].x * display.x),
+                                        float(imageRect.y + (1 - bodyAnchors[selectedBody].y) * display.y)}
                            : geometricOrigin;
-    if (gizmoOrigin.x < 0 || gizmoOrigin.x > display.x || gizmoOrigin.y < 0 || gizmoOrigin.y > display.y)
+    if (!imageRect.contains(gizmoOrigin.x, gizmoOrigin.y))
         return;
     gizmoPixelScale = 2 * depth * tanHalf / display.y;
     gizmoLength = std::min(depth * 0.3, gizmoPixelScale * 90 * uiScale);
     Vec3 axes[] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
     ImU32 colors[] = {IM_COL32(245, 75, 75, 255), IM_COL32(90, 230, 110, 255), IM_COL32(85, 150, 255, 255)};
     const char* labels[] = {"X", "Y", "Z"};
-    auto draw = ImGui::GetBackgroundDrawList();
+    auto draw = ImGui::GetWindowDrawList();
+    draw->PushClipRect(
+        {imageRect.x, imageRect.y}, {imageRect.x + imageRect.width, imageRect.y + imageRect.height}, true);
     ImVec2 start{gizmoOrigin.x, gizmoOrigin.y};
     for (int i = 0; i < 3; ++i)
     {
@@ -254,6 +270,7 @@ void SettingsPanel::drawBodyEditor(PanelActions& actions,
     }
     draw->AddCircleFilled(start, 6 * uiScale, IM_COL32(255, 220, 90, 255));
     draw->AddText({start.x + 9, start.y - 20}, IM_COL32_WHITE, bodyName(scene, selectedBody));
+    draw->PopClipRect();
     gizmoVisible = true;
 }
 } // namespace rt

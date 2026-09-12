@@ -121,6 +121,8 @@ namespace rt
         bool anchorsPublished = false;
         std::vector<Vec3> anchors;
         GLuint displayedTexture = 0;
+        GLuint displayTarget = 0, displayFramebuffer = 0;
+        int displayWidth = 0, displayHeight = 0;
         RenderSettings displayedSettings;
         CameraData camera, displayedCamera;
         SceneData displayedGeometry;
@@ -154,6 +156,8 @@ namespace rt
             glDeleteTextures(1, &texture);
             glDeleteTextures(1, &bodyIdTexture);
             glDeleteTextures(1, &displayedTexture);
+            glDeleteTextures(1, &displayTarget);
+            glDeleteFramebuffers(1, &displayFramebuffer);
             glDeleteVertexArrays(1, &vao);
 
             if (trace)
@@ -586,7 +590,42 @@ namespace rt
         glDrawArrays(GL_TRIANGLES, 0, 3);
     }
 
-    void GpuRenderer::saveDisplayed(const std::filesystem::path& path)
+    DisplayImage GpuRenderer::displayImage()
+    {
+        auto& g = *impl;
+        if (!g.displayedTexture)
+            return {};
+        int w = g.displayedSettings.width, h = g.displayedSettings.height;
+        if (!g.displayTarget || w != g.displayWidth || h != g.displayHeight)
+        {
+            if (!g.displayFramebuffer)
+                glGenFramebuffers(1, &g.displayFramebuffer);
+            if (!g.displayTarget)
+                glGenTextures(1, &g.displayTarget);
+            glBindTexture(GL_TEXTURE_2D, g.displayTarget);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            g.displayWidth = w;
+            g.displayHeight = h;
+        }
+        GLint oldFramebuffer = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &oldFramebuffer);
+        glBindFramebuffer(GL_FRAMEBUFFER, g.displayFramebuffer);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.displayTarget, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, oldFramebuffer);
+            throw std::runtime_error("Viewport framebuffer is incomplete");
+        }
+        present(w, h);
+        glBindFramebuffer(GL_FRAMEBUFFER, oldFramebuffer);
+        return {g.displayTarget, w, h};
+    }
+
+    std::vector<unsigned char> GpuRenderer::readDisplayedRgba(int& width, int& height)
     {
         const auto& g = *impl;
         if (!g.displayedTexture)
@@ -604,7 +643,16 @@ namespace rt
         }
 
         checkGl("Displayed image readback");
-        savePng(path, settings.width, settings.height, pixels, settings.exposure);
+        width = settings.width;
+        height = settings.height;
+        return displayRgba(pixels, width, height, settings.exposure);
+    }
+
+    void GpuRenderer::saveDisplayed(const std::filesystem::path& path)
+    {
+        int width = 0, height = 0;
+        auto rgba = readDisplayedRgba(width, height);
+        saveRgbaPng(path, width, height, rgba);
     }
 
     std::vector<Float4> GpuRenderer::readback()

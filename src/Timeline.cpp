@@ -81,16 +81,67 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
 {
     actions.clear();
     receiveDestination();
+    panel.setHistoryAvailability(editor.canUndo(), editor.canRedo());
     if (panel.selectionRevision() != lastSelectionRevision)
     {
-        editor.selectBody(panel.selectedBodyIndex());
+        if (panel.isCameraSelected())
+        {
+            editor.selectedTrack = 0;
+            editor.selectedKey = -1;
+        }
+        else
+            editor.selectBody(panel.selectedBodyIndex());
         lastSelectionRevision = panel.selectionRevision();
         draggingKey = -1;
     }
-    else if (panel.selectedBodyIndex() != editor.selectedBody())
+    else if (panel.selectedBodyIndex() != editor.selectedBody() ||
+             panel.isCameraSelected() != (editor.selectedTrack == 0))
     {
-        panel.selectBody(editor.selectedBody());
+        if (editor.selectedTrack == 0)
+            panel.selectCamera();
+        else
+            panel.selectBody(editor.selectedBody());
         lastSelectionRevision = panel.selectionRevision();
+    }
+    for (auto command : panel.takeCommands())
+    {
+        if (command == WorkspaceCommand::Escape)
+        {
+            if (job)
+                actions.push_back({Cancel});
+            else if (currentMode == AnimationMode::Playback)
+                actions.push_back({Play});
+            else if (!busy())
+            {
+                actions.push_back({Select, -1});
+                panel.selectBody(-1);
+                lastSelectionRevision = panel.selectionRevision();
+            }
+        }
+        else if (!busy())
+        {
+            if (command == WorkspaceCommand::Undo)
+                actions.push_back({Undo});
+            if (command == WorkspaceCommand::Redo)
+                actions.push_back({Redo});
+            if (command == WorkspaceCommand::Deselect)
+                actions.push_back({Select, -1});
+            if (command == WorkspaceCommand::ExportAnimation)
+            {
+                requestExport = true;
+                panel.showTimeline();
+            }
+        }
+    }
+    const bool typingGlobal = ImGui::GetIO().WantTextInput || ImGui::IsAnyItemActive();
+    if (!busy() && !typingGlobal)
+    {
+        if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false))
+            actions.push_back({Undo});
+        if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false))
+            actions.push_back({Redo});
+        if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) && editor.selectedKey >= 0)
+            actions.push_back({Remove});
     }
     if (!panel.isVisible())
         return;
@@ -112,14 +163,11 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
     }
     if (!message.empty())
         panel.setStatus(message);
-    const auto display = ImGui::GetIO().DisplaySize;
-    float panelHeight =
-        std::min(display.y * 0.6f,
-                 6 * ImGui::GetFrameHeightWithSpacing() +
-                     float(editor.clip.tracks.size() + 1) * (ImGui::GetFrameHeight() + 6) + 40);
-    ImGui::SetNextWindowPos(ImVec2(12, std::max(12.f, display.y - panelHeight - 12)), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(std::max(360.f, display.x - 24), panelHeight), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Timeline"))
+    if (!panel.timelineVisible())
+        return;
+    if (requestExport || reopenExport)
+        ImGui::SetNextWindowFocus();
+    if (!ImGui::Begin("Timeline", nullptr, panel.layoutLocked() ? ImGuiWindowFlags_NoMove : 0))
     {
         ImGui::End();
         return;
@@ -128,16 +176,25 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
     const bool playing = currentMode == AnimationMode::Playback;
     bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     bool typing = ImGui::GetIO().WantTextInput || ImGui::IsAnyItemActive();
+    auto continueRow = [](float nextWidth)
+    {
+        float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+        if (ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + nextWidth <= right)
+            ImGui::SameLine();
+    };
+    auto buttonWidth = [](const char* label)
+    {
+        return ImGui::CalcTextSize(label).x + 2 * ImGui::GetStyle().FramePadding.x;
+    };
+    bool newRow = true;
     auto button = [&](const char* label, Command c, int v = 0, int other = 0)
     {
+        if (!newRow)
+            continueRow(buttonWidth(label));
+        newRow = false;
         if (ImGui::Button(label))
             actions.push_back({c, v, other});
-        ImGui::SameLine();
     };
-    ImGui::BeginDisabled(exporting);
-    button(playing ? "Pause" : "Play", Play);
-    button("< Frame", Seek, editor.frame - 1);
-    button("Frame >", Seek, editor.frame + 1);
     const auto* track = editor.hasSelection() ? &editor.clip.tracks[editor.selectedTrack] : nullptr;
     int previous = 0, next = editor.clip.frames - 1;
     if (track)
@@ -151,29 +208,71 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
                 break;
             }
         }
-    ImGui::BeginDisabled(!track);
-    button("< Key", Seek, previous);
-    button("Key >", Seek, next);
-    ImGui::EndDisabled();
-    ImGui::SetNextItemWidth(160);
+    // Transport and key editing occupy separate rows; timing settings live in a popup.
+    ImGui::BeginDisabled(exporting);
+    button("|<", Seek, previous);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Previous keyframe");
+    button("<", Seek, editor.frame - 1);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Previous frame");
+    button(playing ? "Pause" : "Play", Play);
+    button(">", Seek, editor.frame + 1);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Next frame");
+    button(">|", Seek, next);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Next keyframe");
+    continueRow(80 * ImGui::GetStyle().FontScaleDpi);
+    ImGui::SetNextItemWidth(80 * ImGui::GetStyle().FontScaleDpi);
     int frame = editor.frame;
-    if (ImGui::InputInt("Frame", &frame))
+    if (ImGui::InputInt("##Frame", &frame, 0, 0))
         actions.push_back({Seek, frame});
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Current frame (0 to %d)", editor.clip.frames - 1);
+    continueRow(150 * ImGui::GetStyle().FontScaleDpi);
+    ImGui::TextDisabled("/ %d   %.2f s", editor.clip.frames - 1, double(editor.frame) / editor.clip.fps);
     ImGui::EndDisabled();
+    continueRow(buttonWidth("Animation settings"));
+    ImGui::BeginDisabled(busy());
+    if (ImGui::Button("Animation settings"))
+    {
+        draftFrames = editor.clip.frames;
+        draftFps = editor.clip.fps;
+        ImGui::OpenPopup("Animation settings");
+    }
+    if (ImGui::BeginPopup("Animation settings"))
+    {
+        ImGui::SetNextItemWidth(140);
+        ImGui::InputInt("Frames", &draftFrames);
+        ImGui::SetNextItemWidth(140);
+        ImGui::InputInt("FPS", &draftFps);
+        ImGui::TextDisabled("%.2f seconds", double(std::max(1, draftFrames)) / std::max(1, draftFps));
+        if (ImGui::Button("Apply"))
+        {
+            actions.push_back({Configure, draftFrames, draftFps});
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+    ImGui::EndDisabled();
+    ImGui::Separator();
+    newRow = true;
     ImGui::BeginDisabled(busy());
     ImGui::BeginDisabled(!track);
-    button(!track || track->keyAt(editor.frame) < 0 ? "Add Keyframe" : "Update Keyframe", Capture);
-    button("Remove Keyframe", Remove);
-    button("Deselect", Select, -1);
+    std::string capture =
+        track ? (track->keyAt(editor.frame) < 0 ? "Add " : "Update ") + track->name + " keyframe"
+              : "Add keyframe";
+    button(capture.c_str(), Capture);
+    ImGui::BeginDisabled(!track || (editor.selectedKey < 0 && track->keyAt(editor.frame) < 0));
+    button("Remove", Remove);
     ImGui::EndDisabled();
-    ImGui::BeginDisabled(!editor.canUndo());
-    button("Undo", Undo);
     ImGui::EndDisabled();
-    ImGui::BeginDisabled(!editor.canRedo());
-    button("Redo", Redo);
-    ImGui::EndDisabled();
-    if (ImGui::Button("Export..."))
+    continueRow(buttonWidth("Export..."));
+    bool exportClicked = ImGui::Button("Export...");
+    if (exportClicked || requestExport)
     {
+        requestExport = false;
         width = committed.width;
         height = committed.height;
         samples = committed.samples;
@@ -185,43 +284,28 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
         format = 1;
         ImGui::OpenPopup("Export animation");
     }
-    ImGui::EndDisabled();
-    ImGui::Text("%d / %d frames | %.3f s | %.3f s total%s",
-                editor.frame,
-                editor.clip.frames - 1,
-                double(editor.frame) / editor.clip.fps,
-                double(editor.clip.frames) / editor.clip.fps,
-                editor.hasDrafts() ? " | Unkeyed changes (discarded on seek/play/export)" : "");
-    ImGui::BeginDisabled(busy());
-    ImGui::SetNextItemWidth(160);
-    ImGui::InputInt("Frames", &draftFrames);
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(140);
-    ImGui::InputInt("FPS", &draftFps);
-    ImGui::SameLine();
-    button("Apply timing", Configure, draftFrames, draftFps);
-    ImGui::EndDisabled();
-    ImGui::SetNextItemWidth(130);
-    ImGui::SliderFloat("Zoom", &pixelsPerFrame, 2, 40, "%.1f px/frame");
-    if (!exporting && !typing)
+    if (editor.hasDrafts())
     {
-        if (focused && ImGui::IsKeyPressed(ImGuiKey_Space, false))
-            actions.push_back({Play});
-        if (!playing)
-        {
-            if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) && editor.selectedKey >= 0)
-                actions.push_back({Remove});
-            if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false))
-                actions.push_back({Undo});
-            if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false))
-                actions.push_back({Redo});
-        }
+        continueRow(ImGui::CalcTextSize("Pose not captured").x);
+        ImGui::TextColored({1, 0.77f, 0.38f, 1}, "Pose not captured");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Capture the edited track to keep its pose. Seeking, playback or export "
+                              "discards uncaptured poses. Revert is undoable.");
+        continueRow(buttonWidth("Revert poses"));
+        if (ImGui::SmallButton("Revert poses"))
+            actions.push_back({Seek, editor.frame});
     }
+    ImGui::EndDisabled();
+    continueRow(110 + ImGui::CalcTextSize("Zoom").x);
+    ImGui::SetNextItemWidth(100);
+    ImGui::SliderFloat("Zoom", &pixelsPerFrame, 2, 40, "%.0f");
+    if (!exporting && !typing && focused && ImGui::IsKeyPressed(ImGuiKey_Space, false))
+        actions.push_back({Play});
     if (ImGui::BeginChild(
             "Track lanes", ImVec2(0, 0), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar))
     {
         const float labelWidth = std::max(110.f, ImGui::CalcTextSize("Black hole").x + 24),
-                    row = ImGui::GetFrameHeight() + 6;
+                    row = ImGui::GetTextLineHeight() + 10;
         ImVec2 origin = ImGui::GetCursorScreenPos();
         auto* dl = ImGui::GetWindowDrawList();
         float rulerWidth = std::max(1, editor.clip.frames - 1) * pixelsPerFrame + 20;
@@ -364,7 +448,10 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
         if (a.command == Select)
         {
             int body = a.value >= 0 ? editor.clip.tracks[a.value].body : -1;
-            panel.selectBody(body);
+            if (a.value == 0)
+                panel.selectCamera();
+            else
+                panel.selectBody(body);
             lastSelectionRevision = panel.selectionRevision();
         }
 }

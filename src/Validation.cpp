@@ -3,6 +3,8 @@
 #include "SdlSupport.h"
 #include "SettingsPanel.h"
 #include "Timeline.h"
+#include <imgui.h>
+#include <imgui_internal.h>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -782,29 +784,61 @@ int runGpuTests(const std::filesystem::path& assets)
     gpu.reset(editSettings, editCamera);
     waitFor(gpu);
 
+    {
+        auto image = gpu.displayImage();
+        int width = 0, height = 0;
+        auto rgba = gpu.readDisplayedRgba(width, height);
+        require(image.width == width && image.height == height,
+                "Viewport must preserve displayed image dimensions");
+        std::vector<unsigned char> texture(rgba.size());
+        glBindTexture(GL_TEXTURE_2D, image.texture);
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture.data());
+        for (int y = 0; y < height; ++y)
+            for (int x = 0; x < width; ++x)
+                for (int c = 0; c < 4; ++c)
+                    require(std::abs(int(rgba[(y * width + x) * 4 + c]) -
+                                     int(texture[((height - 1 - y) * width + x) * 4 + c])) <= 2,
+                            "Docked viewport must match saved PNG colors and orientation");
+    }
     // Exercise a real ImGui frame and synthetic SDL handle drag in a hidden window.
     auto window = SDL_GL_GetCurrentWindow();
     checkSdl(SDL_SetWindowSize(window, 1200, 800), "Size editor test window");
     {
         SettingsPanel panel(window, editSettings);
         panel.selectBody(0);
+        panel.setDisplayImage(gpu.displayImage());
         double slowStep = 0.0005;
         editSettings.width = 1200;
         editSettings.height = 800;
+        for (int i = 0; i < 3; ++i)
+        {
+            panel.beginFrame();
+            panel.draw(slowStep, gpu.progress(), editSettings, false, editCamera, editedScene);
+            panel.render();
+        }
+        auto viewport = panel.viewport();
+        require(viewport.x > 0 && viewport.y > 0 && viewport.width > 0 && viewport.width < 1200,
+                "Docking must reserve a separate scene viewport");
+        require(ImGui::FindWindowByName("Render Settings")->DockId != 0 &&
+                    !ImGui::FindWindowByName("Render Settings")->HasCloseButton,
+                "Render settings must be docked without a close button");
+        float handleX = viewport.x + viewport.width / 2 + 40 * ImGui::GetStyle().FontScaleDpi;
+        float handleY = viewport.y + viewport.height / 2;
+        ImGui::GetIO().AddMousePosEvent(handleX, handleY);
         panel.beginFrame();
         panel.draw(slowStep, gpu.progress(), editSettings, false, editCamera, editedScene);
         panel.render();
         SDL_Event press{};
         press.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
         press.button.button = SDL_BUTTON_LEFT;
-        press.button.x = 650;
-        press.button.y = 400;
+        press.button.x = handleX;
+        press.button.y = handleY;
         panel.processEvent(press);
         require(panel.manipulatingBody(), "X translation handle must capture the mouse");
         SDL_Event move{};
         move.type = SDL_EVENT_MOUSE_MOTION;
-        move.motion.x = 680;
-        move.motion.y = 400;
+        move.motion.x = handleX + 30;
+        move.motion.y = handleY;
         panel.processEvent(move);
         panel.beginFrame();
         auto actions = panel.draw(slowStep, gpu.progress(), editSettings, false, editCamera, editedScene);
@@ -826,11 +860,43 @@ int runGpuTests(const std::filesystem::path& assets)
             panel.render();
         };
         timelineFrame();
+        panel.selectCamera();
+        timelineFrame();
+        timelineFrame();
+        require(panel.isCameraSelected() && panel.selectedBodyIndex() == -1,
+                "Camera selection must remain distinct from deselection");
         panel.selectBody(-1); // The viewport's existing background-pick action.
         timelineFrame();
         timelineFrame(); // Regression: the previous timeline reselected the body here.
         require(panel.selectedBodyIndex() == -1 && !panel.manipulatingBody(),
                 "Timeline must preserve background deselection across frames");
+        panel.selectBody(0);
+        timelineFrame();
+        SDL_Event escape{};
+        escape.type = SDL_EVENT_KEY_DOWN;
+        escape.key.key = SDLK_ESCAPE;
+        panel.processEvent(escape);
+        timelineFrame();
+        timelineFrame();
+        require(panel.selectedBodyIndex() == -1,
+                "Escape must clear selection through the animation controller");
+        auto dock = ImGui::FindWindowByName("Render Settings")->DockId;
+        SDL_Event toggle{};
+        toggle.type = SDL_EVENT_KEY_DOWN;
+        toggle.key.key = SDLK_F1;
+        panel.processEvent(toggle);
+        timelineFrame();
+        require(!panel.isVisible() && panel.viewportArea().width > 1190,
+                "F1 must show the scene across the full window");
+        panel.processEvent(toggle);
+        timelineFrame();
+        timelineFrame();
+        require(panel.isVisible() && ImGui::FindWindowByName("Render Settings")->DockId == dock,
+                "F1 must restore the dock layout");
+        require(ImGui::GetIO().IniFilename == nullptr,
+                "Hidden validation must not modify workspace preferences");
+        auto ini = std::string(ImGui::SaveIniSettingsToMemory());
+        require(ini.find("[Docking][Data]") != std::string::npos, "Workspace must serialize docking layout");
     }
     std::cout << "GPU tests passed: trajectories, materials/textures, deterministic rendering, "
                  "cancellation/resize, presentation, PNG, missing assets.\n";

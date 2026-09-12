@@ -8,9 +8,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <iomanip>
+#include <mutex>
+#include <future>
 #include <iostream>
-#include <sstream>
 #include <stdexcept>
 #include <thread>
 #ifdef _WIN32
@@ -198,8 +198,8 @@ int main(int argc, char** argv)
                     << "  --slow-step N (Shift movement per tap; default 0.0005; held speed 20*N units/s)\n"
                     << "  --full-scene-integration | --adaptative (default: fixed radius)\n"
                     << "Left/right-drag looks; arrows/WASD move; Q/E rise/descend; P saves; F1 toggles "
-                       "settings; "
-                       "Escape exits.\n";
+                       "interface; "
+                       "Escape stops playback or deselects.\n";
                 return 0;
             }
             else
@@ -271,7 +271,8 @@ int main(int argc, char** argv)
         bool lookMoved = false;
         bool geometryDirty = false;
         constexpr double mouseSensitivity = 0.004;
-        auto last = Clock::now(), titleTime = last;
+        auto last = Clock::now();
+        rt::checkSdl(SDL_SetWindowTitle(window.get(), "Schwarzschild Ray Tracer"), "Set window title");
         auto lastMovement = last;
         bool preview = false, cameraPending = false;
         auto activeSettings = settings;
@@ -280,17 +281,42 @@ int main(int argc, char** argv)
         bool renderSettingsPending = false;
         bool matchWindow = true;
         auto lastSettingsEdit = last;
+
+        struct ImageDestination
+        {
+            std::mutex mutex;
+            bool ready = false;
+            std::string path, error;
+        };
+
+        std::shared_ptr<ImageDestination> imageDialog;
+        std::vector<unsigned char> savedImage;
+        int savedWidth = 0, savedHeight = 0;
+        std::future<std::string> imageWrite;
         auto saveImage = [&]
         {
+            if (imageDialog || imageWrite.valid())
+                return;
             try
             {
-                auto stamp = std::chrono::duration_cast<std::chrono::microseconds>(
-                                 std::chrono::system_clock::now().time_since_epoch())
-                                 .count();
-                auto path = executableDirectory() / "Output" / ("img-" + std::to_string(stamp) + ".png");
-                renderer.saveDisplayed(path);
-                panel.setStatus("Saved " + path.u8string());
-                std::cout << "Saved " << path << std::endl;
+                // Capture the displayed image now; later camera edits cannot change the saved image.
+                savedImage = renderer.readDisplayedRgba(savedWidth, savedHeight);
+                imageDialog = std::make_shared<ImageDestination>();
+                auto* context = new std::shared_ptr<ImageDestination>(imageDialog);
+                auto callback = [](void* data, const char* const* paths, int)
+                {
+                    std::unique_ptr<std::shared_ptr<ImageDestination>> owner(
+                        static_cast<std::shared_ptr<ImageDestination>*>(data));
+                    auto& result = **owner;
+                    std::lock_guard<std::mutex> lock(result.mutex);
+                    if (!paths)
+                        result.error = SDL_GetError();
+                    else if (paths[0])
+                        result.path = paths[0];
+                    result.ready = true;
+                };
+                static const SDL_DialogFileFilter filters[] = {{"PNG image", "png"}};
+                SDL_ShowSaveFileDialog(callback, context, window.get(), filters, 1, "image.png");
             }
             catch (const std::exception& error)
             {
@@ -311,9 +337,7 @@ int main(int argc, char** argv)
                 const bool captureKeyboard = panel.capturesKeyboard() || timeline.busy();
                 if (captureMouse)
                     dragging = false;
-                if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED ||
-                    (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_ESCAPE &&
-                     !captureKeyboard))
+                if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
                     running = false;
 
                 if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
@@ -327,7 +351,8 @@ int main(int argc, char** argv)
 
                 if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
                     (event.button.button == SDL_BUTTON_LEFT || event.button.button == SDL_BUTTON_RIGHT) &&
-                    focused && !minimized && !captureMouse && !dragging)
+                    focused && !minimized && !captureMouse && !dragging &&
+                    panel.viewport().contains(event.button.x, event.button.y))
                 {
                     dragging = true;
                     lookButton = event.button.button;
@@ -340,11 +365,11 @@ int main(int argc, char** argv)
                     dragging && lookButton == SDL_BUTTON_LEFT && !lookMoved && !captureMouse && focused &&
                     !minimized)
                 {
-                    int width = 0, height = 0;
-                    rt::checkSdl(SDL_GetWindowSize(window.get(), &width, &height), "Get picking viewport");
-                    if (width > 0 && height > 0)
-                        panel.selectBody(
-                            renderer.pickDisplayed(event.button.x / width, 1.0 - event.button.y / height));
+                    if (panel.viewport().contains(event.button.x, event.button.y))
+                    {
+                        auto uv = panel.viewport().imagePoint(event.button.x, event.button.y);
+                        panel.selectBody(renderer.pickDisplayed(uv.x, uv.y));
+                    }
                 }
 
                 if ((event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == lookButton) ||
@@ -429,20 +454,9 @@ int main(int argc, char** argv)
                     dragging = false;
                     minimized = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MINIMIZED) != 0 ||
                                 event.window.data1 <= 0 || event.window.data2 <= 0;
-
-                    if (!minimized && matchWindow && !timeline.busy())
-                    {
-                        auto size = renderer.fitResolution(int(event.window.data1), int(event.window.data2));
-                        settings.width = size[0];
-                        settings.height = size[1];
-                        panel.syncResolution(settings.width, settings.height);
-                        reset = true;
-                    }
                 }
-
-                if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_P &&
-                    !captureKeyboard && !minimized)
-                    saveImage();
+                if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)
+                    dragging = false;
             }
 
             if (!running)
@@ -457,11 +471,78 @@ int main(int argc, char** argv)
                 continue;
             }
 
+            if (imageDialog)
+            {
+                bool ready = false;
+                std::string path, error;
+                {
+                    std::lock_guard<std::mutex> lock(imageDialog->mutex);
+                    ready = imageDialog->ready;
+                    path = imageDialog->path;
+                    error = imageDialog->error;
+                }
+                if (ready)
+                {
+                    imageDialog.reset();
+                    if (!error.empty())
+                        panel.setStatus("Cannot save image: " + error, true);
+                    else if (path.empty())
+                        panel.setStatus("Image save cancelled.");
+                    else
+                    {
+                        auto destination = std::filesystem::u8path(path);
+                        if (destination.extension().empty())
+                            destination += ".png";
+                        imageWrite = std::async(
+                            std::launch::async,
+                            [destination, pixels = std::move(savedImage), w = savedWidth, h = savedHeight]()
+                            {
+                                rt::saveRgbaPng(destination, w, h, pixels);
+                                return destination.u8string();
+                            });
+                        panel.setStatus("Saving image...");
+                    }
+                    savedImage.clear();
+                }
+            }
+            if (imageWrite.valid() &&
+                imageWrite.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+            {
+                try
+                {
+                    panel.setStatus("Saved " + imageWrite.get());
+                }
+                catch (const std::exception& error)
+                {
+                    panel.setStatus(error.what(), true);
+                }
+            }
+            panel.setDisplayImage(renderer.displayImage());
             panel.setBodyAnchors(renderer.bodyAnchors());
             panel.beginFrame();
             auto actions =
                 panel.draw(slowMovementStep, renderer.progress(), activeSettings, preview, camera, scene);
             timeline.draw(panel, settings);
+            if (actions.quit)
+                running = false;
+            if (!timeline.busy() && matchWindow && panel.viewportArea().width > 0 &&
+                panel.viewportArea().height > 0)
+            {
+                auto pixels = panel.viewportPixels();
+                auto size = renderer.fitResolution(pixels[0], pixels[1]);
+                if (size[0] != settings.width || size[1] != settings.height)
+                {
+                    settings.width = size[0];
+                    settings.height = size[1];
+                    if (pendingMatchWindow)
+                    {
+                        pendingSettings.width = size[0];
+                        pendingSettings.height = size[1];
+                    }
+                    panel.syncResolution(size[0], size[1]);
+                    reset = true;
+                }
+            }
             if (actions.body >= 0 && actions.body < int(scene.spheres.size()))
             {
                 auto& center = scene.spheres[actions.body].centerRadius;
@@ -489,12 +570,11 @@ int main(int argc, char** argv)
                 try
                 {
                     auto requested = panel.requestedSettings();
-                    if (panel.followsWindow())
+                    if (panel.followsWindow() && panel.viewportArea().width > 0 &&
+                        panel.viewportArea().height > 0)
                     {
-                        int width = 0, height = 0;
-                        rt::checkSdl(SDL_GetWindowSizeInPixels(window.get(), &width, &height),
-                                     "Get drawable size");
-                        auto size = renderer.fitResolution(width, height);
+                        auto pixels = panel.viewportPixels();
+                        auto size = renderer.fitResolution(pixels[0], pixels[1]);
                         requested.width = size[0];
                         requested.height = size[1];
                     }
@@ -616,9 +696,6 @@ int main(int argc, char** argv)
 
             if (!minimized)
             {
-                int width = 0, height = 0;
-                rt::checkSdl(SDL_GetWindowSizeInPixels(window.get(), &width, &height), "Get drawable size");
-                renderer.present(width, height);
                 panel.render();
                 rt::checkSdl(SDL_GL_SwapWindow(window.get()), "Swap window");
             }
@@ -627,23 +704,6 @@ int main(int argc, char** argv)
                 ImGui::EndFrame();
 
             renderer.dispatch();
-
-            if (seconds(titleTime) > 0.25)
-            {
-                const auto& p = renderer.progress();
-                std::ostringstream title;
-                title << "Schwarzschild | "
-                      << (settings.integrationMode == rt::RenderSettings::FixedRadius ? "fixed radius"
-                          : settings.integrationMode == rt::RenderSettings::FullScene ? "full scene"
-                                                                                      : "adaptive cutoff")
-                      << " | " << std::fixed << std::setprecision(1) << p.meanSamples << "/"
-                      << activeSettings.samples << " spp | " << activeSettings.width << "x"
-                      << activeSettings.height << (preview ? " preview" : " refine") << " | GPU "
-                      << p.lastBatchMilliseconds << " ms | invalid " << p.failures << " | "
-                      << renderer.device();
-                rt::checkSdl(SDL_SetWindowTitle(window.get(), title.str().c_str()), "Set window title");
-                titleTime = Clock::now();
-            }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }

@@ -4,6 +4,12 @@
 
 namespace rt
 {
+struct DisplayImage
+{
+    unsigned int texture = 0;
+    int width = 0, height = 0;
+};
+
 struct GpuProgress
 {
     double meanSamples = 0, lastBatchMilliseconds = 0, maxBatchMilliseconds = 0, totalGpuMilliseconds = 0;
@@ -28,6 +34,8 @@ class GpuRenderer
     bool dispatch(); // Nonblocking; at most one bounded batch in flight.
     bool poll();
     void present(int width, int height);
+    DisplayImage displayImage(); // Tone-mapped image for the docked viewport (bottom-up UVs).
+    std::vector<unsigned char> readDisplayedRgba(int& width, int& height);
     void saveDisplayed(const std::filesystem::path& path);
     std::vector<Float4> readback(); // Completed samples, bottom row first.
     std::vector<RayResult> traceRays(const SceneData&,
