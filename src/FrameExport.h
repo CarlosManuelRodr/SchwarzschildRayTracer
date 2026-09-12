@@ -16,6 +16,7 @@ struct ExportSpec
     ExportFormat format = ExportFormat::Mp4;
     std::filesystem::path destination;
     int width = 1920, height = 1080, frames = 300, fps = 30, bitrate = 20000000;
+    void validateSettings() const;
     void validate() const;
 };
 

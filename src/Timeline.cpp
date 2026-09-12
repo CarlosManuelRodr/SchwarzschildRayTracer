@@ -12,6 +12,21 @@ Timeline::Timeline(const SceneData& scene, const CameraData& camera) : editor(sc
 
 Timeline::~Timeline() = default;
 
+void Timeline::prepareExport(const RenderSettings& committed)
+{
+    requestExport = false;
+    width = std::max(2, committed.width - committed.width % 2);
+    height = std::max(2, committed.height - committed.height % 2);
+    samples = committed.samples;
+    auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
+    const char* videos = SDL_GetUserFolder(SDL_FOLDER_VIDEOS);
+    destination = ((videos ? std::filesystem::u8path(videos) : std::filesystem::current_path()) /
+                   ("animation-" + std::to_string(stamp) + ".mp4"))
+                      .u8string();
+    format = 1;
+    message.clear();
+}
+
 void Timeline::chooseDestination(SDL_Window* window)
 {
     if (dialogPending)
@@ -272,16 +287,7 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
     bool exportClicked = ImGui::Button("Export...");
     if (exportClicked || requestExport)
     {
-        requestExport = false;
-        width = committed.width;
-        height = committed.height;
-        samples = committed.samples;
-        auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
-        const char* videos = SDL_GetUserFolder(SDL_FOLDER_VIDEOS);
-        destination = ((videos ? std::filesystem::u8path(videos) : std::filesystem::current_path()) /
-                       ("animation-" + std::to_string(stamp) + ".mp4"))
-                          .u8string();
-        format = 1;
+        prepareExport(committed);
         ImGui::OpenPopup("Export animation");
     }
     if (editor.hasDrafts())
@@ -433,11 +439,24 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
         ImGui::Text("%d frames at %d FPS. Uses committed render settings and seed.",
                     editor.clip.frames,
                     editor.clip.fps);
+        std::string settingsError;
+        try
+        {
+            exportSpec(committed).validateSettings();
+        }
+        catch (const std::exception& error)
+        {
+            settingsError = error.what();
+        }
+        if (!settingsError.empty())
+            ImGui::TextColored({1, 0.55f, 0.45f, 1}, "%s", settingsError.c_str());
+        ImGui::BeginDisabled(!settingsError.empty());
         if (ImGui::Button("Choose location and export..."))
         {
             ImGui::CloseCurrentPopup();
             chooseDestination(SDL_GL_GetCurrentWindow());
         }
+        ImGui::EndDisabled();
         ImGui::SameLine();
         if (ImGui::Button("Close"))
             ImGui::CloseCurrentPopup();
@@ -456,10 +475,7 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
         }
 }
 
-void Timeline::startExport(SceneData& scene,
-                           CameraData& camera,
-                           GpuRenderer& renderer,
-                           const RenderSettings& committed)
+ExportSpec Timeline::exportSpec(const RenderSettings& committed) const
 {
     ExportSpec spec;
     spec.format = format == 1 ? ExportFormat::Mp4 : ExportFormat::PngSequence;
@@ -471,12 +487,25 @@ void Timeline::startExport(SceneData& scene,
     if (!std::isfinite(bitrate) || bitrate < 0.1f || bitrate > 200)
         throw std::runtime_error("Bitrate must be 0.1 to 200 Mbps");
     spec.bitrate = int(bitrate * 1000000);
+    auto settings = committed;
+    settings.width = width;
+    settings.height = height;
+    settings.samples = samples;
+    settings.validate();
+    return spec;
+}
+
+void Timeline::startExport(SceneData& scene,
+                           CameraData& camera,
+                           GpuRenderer& renderer,
+                           const RenderSettings& committed)
+{
+    auto spec = exportSpec(committed);
     spec.validate();
     exportSettings = committed;
     exportSettings.width = width;
     exportSettings.height = height;
     exportSettings.samples = samples;
-    exportSettings.validate();
     auto size = renderer.fitResolution(width, height);
     if (size[0] != width || size[1] != height)
         throw std::runtime_error("Export resolution exceeds GPU budget");

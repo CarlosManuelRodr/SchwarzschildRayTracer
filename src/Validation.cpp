@@ -898,6 +898,53 @@ int runGpuTests(const std::filesystem::path& assets)
                 "Hidden validation must not modify workspace preferences");
         auto ini = std::string(ImGui::SaveIniSettingsToMemory());
         require(ini.find("[Docking][Data]") != std::string::npos, "Workspace must serialize docking layout");
+        // Reproduce the native picker returning after an odd-sized docked viewport.
+        auto oddSettings = editSettings;
+        oddSettings.width = 65;
+        oddSettings.height = 49;
+        oddSettings.samples = 1;
+        timeline.prepareExport(oddSettings);
+        require(timeline.width == 64 && timeline.height == 48,
+                "MP4 defaults must round viewport dimensions to even pixels");
+        timeline.editor.configure(2, 30);
+        timeline.exportSpec(oddSettings).validateSettings();
+        timeline.width = 65;
+        bool invalid = false;
+        try
+        {
+            timeline.exportSpec(oddSettings).validateSettings();
+        }
+        catch (const std::exception&)
+        {
+            invalid = true;
+        }
+        require(invalid, "Odd MP4 dimensions must be rejected before opening a destination dialog");
+        timeline.width = 64;
+        auto target = std::filesystem::temp_directory_path() /
+                      ("timeline-dialog-" +
+                       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".mp4");
+#ifdef _WIN32
+        timeline.dialogPending = true;
+        timeline.dialogResult = std::make_shared<Timeline::DialogResult>();
+        timeline.dialogResult->path = target.u8string();
+        timeline.dialogResult->ready = true;
+        timelineFrame();
+        require(timeline.mode() == AnimationMode::Export && !timeline.dialogPending && !timeline.reopenExport,
+                "A chosen destination must start export once without reopening the picker");
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (timeline.busy() && std::chrono::steady_clock::now() < deadline)
+        {
+            gpu.poll();
+            timelineFrame();
+            gpu.dispatch();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        require(!timeline.busy() && std::filesystem::exists(target) && std::filesystem::file_size(target) > 0,
+                "Timeline export must finalize an MP4 after the destination callback");
+        require(!timeline.dialogPending && !timeline.reopenExport,
+                "Successful export must not request another destination");
+        std::filesystem::remove(target);
+#endif
     }
     std::cout << "GPU tests passed: trajectories, materials/textures, deterministic rendering, "
                  "cancellation/resize, presentation, PNG, missing assets.\n";

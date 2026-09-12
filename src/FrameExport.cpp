@@ -3,16 +3,21 @@
 
 namespace rt
 {
-void ExportSpec::validate() const
+void ExportSpec::validateSettings() const
 {
-    if (destination.empty())
-        throw std::runtime_error("Choose an export destination");
     if (width < 1 || height < 1 || width > 16384 || height > 16384 || frames < 1 || frames > 1000000 ||
         fps < 1 || fps > 240)
         throw std::runtime_error("Invalid export size, frame count or FPS");
     if (format == ExportFormat::Mp4 &&
         ((width % 2) || (height % 2) || bitrate < 100000 || bitrate > 200000000))
         throw std::runtime_error("MP4 needs even dimensions and a bitrate between 0.1 and 200 Mbps");
+}
+
+void ExportSpec::validate() const
+{
+    validateSettings();
+    if (destination.empty())
+        throw std::runtime_error("Choose an export destination");
     if (std::filesystem::exists(destination))
         throw std::runtime_error("Export destination already exists; choose a new name");
 }

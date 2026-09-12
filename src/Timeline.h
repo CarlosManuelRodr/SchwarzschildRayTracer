@@ -36,6 +36,10 @@ class Timeline
         SceneData&, CameraData&, GpuRenderer&, const RenderSettings&, RenderSettings& active, bool gesture);
 
   private:
+    friend int runGpuTests(const std::filesystem::path&);
+    void prepareExport(const RenderSettings&);
+    ExportSpec exportSpec(const RenderSettings&) const;
+
     enum Command
     {
         None,
