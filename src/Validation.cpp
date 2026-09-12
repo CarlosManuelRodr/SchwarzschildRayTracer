@@ -102,13 +102,14 @@ int runCpuTests()
     auto beforeMove = navigation.position;
     navigation.moveLocal({0, 0, 1}, 1);
     require(navigation.position.y > beforeMove.y + 0.99, "Forward movement must follow camera pitch");
-    navigation.basis(4.0 / 3.0);
+    navigation.validate();
     navigation.rotateView(0, -200);
-    navigation.basis(4.0 / 3.0);
+    navigation.validate();
     require(std::abs(distance(navigation.position, navigation.lookAt) - 2) < 1e-12,
             "Pitch clamping must preserve focus distance and a valid basis");
 
     RenderSettings settings;
+    settings.observerType = RenderSettings::Hovering;
     CameraData velocityCamera;
     velocityCamera.position = {0, 0, 4};
     velocityCamera.lookAt = {0, 0, 3};
@@ -259,6 +260,7 @@ int runCpuTests()
     observerScene.materials.push_back({{Environment, 0, 0, 0}, {1, 0, 0, 0}});
     observerScene.spheres.push_back({{0, 0, 0, 20}, {1, 0, 0, 0}});
     RenderSettings observerSettings;
+    observerSettings.observerType = RenderSettings::Hovering;
     for (double radius : {0.5, 1.0})
     {
         require(traceCpu(observerScene, observerSettings, {radius, 0, 0}, {1, 0, 0}).status == 3,

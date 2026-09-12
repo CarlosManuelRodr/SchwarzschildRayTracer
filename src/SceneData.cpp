@@ -26,19 +26,31 @@ namespace rt
         return n > 1e-20 ? a / n : Vec3(0);
     }
 
-    std::array<Vec3, 4> CameraData::basis(const double aspect) const
+    void CameraData::validate() const
     {
         if (!std::isfinite(dot(position, position)) || !std::isfinite(dot(lookAt, lookAt)) ||
             !std::isfinite(dot(up, up)) || !std::isfinite(verticalFov) || verticalFov <= 0 ||
-            verticalFov >= 179 || !std::isfinite(aspect) || aspect <= 0)
+            verticalFov >= 179)
         {
             throw std::runtime_error("Invalid camera settings");
         }
 
-        const Vec3 w = normalized(position - lookAt), u = normalized(cross(up, w));
+        const Vec3 forward = normalized(lookAt - position);
+        const Vec3 right = normalized(cross(forward, up));
 
-        if (dot(w, w) == 0 || dot(u, u) == 0)
+        if (dot(forward, forward) == 0 || dot(right, right) == 0)
             throw std::runtime_error("Degenerate camera basis");
+    }
+
+    std::array<Vec3, 4> CameraData::basis(const double aspect) const
+    {
+        validate();
+
+        if (!std::isfinite(aspect) || aspect <= 0)
+            throw std::runtime_error("Invalid camera aspect ratio");
+
+        const Vec3 w = normalized(position - lookAt);
+        const Vec3 u = normalized(cross(up, w));
         const Vec3 v = cross(w, u);
         const double h = std::tan(verticalFov * 3.141592653589793 / 360.0);
 

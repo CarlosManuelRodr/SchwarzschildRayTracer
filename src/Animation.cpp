@@ -24,7 +24,7 @@ namespace rt
 
     Pose cameraPose(const CameraData& camera)
     {
-        camera.basis(1);
+        camera.validate();
         const Vec3 z = normalized(camera.position - camera.lookAt);
         Vec3 x = normalized(cross(camera.up, z)), y = cross(z, x);
         const double m[3][3] = {{x.x, y.x, z.x}, {x.y, y.y, z.y}, {x.z, y.z, z.z}};

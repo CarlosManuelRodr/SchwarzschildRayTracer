@@ -187,7 +187,8 @@ namespace rt
         void moveLocal(const Vec3 &direction, double distance);
         void rotateView(double yaw, double pitch);
 
-        std::array<Vec3, 4> basis(double aspect) const;
+        void validate() const;
+        [[nodiscard]] std::array<Vec3, 4> basis(double aspect) const;
     };
 
     SceneData defaultScene(const std::filesystem::path& assets);
