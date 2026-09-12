@@ -4,6 +4,12 @@
 
 namespace rt
 {
+struct DisplayImage
+{
+    unsigned int texture = 0;
+    int width = 0, height = 0;
+};
+
 struct GpuProgress
 {
     double meanSamples = 0, lastBatchMilliseconds = 0, maxBatchMilliseconds = 0, totalGpuMilliseconds = 0;
@@ -20,11 +26,16 @@ class GpuRenderer
     GpuRenderer(const GpuRenderer&) = delete;
     GpuRenderer& operator=(const GpuRenderer&) = delete;
     void uploadScene(const SceneData& scene);
+    void updateGeometry(const SceneData& scene);
+    int pickDisplayed(double u, double v) const;
+    const std::vector<Vec3>& bodyAnchors() const;
     void reset(const RenderSettings& settings, const CameraData& camera);
     std::array<int, 2> fitResolution(int width, int height) const;
     bool dispatch(); // Nonblocking; at most one bounded batch in flight.
     bool poll();
     void present(int width, int height);
+    DisplayImage displayImage(); // Tone-mapped image for the docked viewport (bottom-up UVs).
+    std::vector<unsigned char> readDisplayedRgba(int& width, int& height);
     void saveDisplayed(const std::filesystem::path& path);
     std::vector<Float4> readback(); // Completed samples, bottom row first.
     std::vector<RayResult> traceRays(const SceneData&,

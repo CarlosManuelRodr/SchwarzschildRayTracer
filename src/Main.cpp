@@ -3,12 +3,14 @@
 #include <SDL3/SDL_main.h>
 #include "SdlSupport.h"
 #include "SettingsPanel.h"
+#include "Timeline.h"
+#include <imgui.h>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <iomanip>
+#include <mutex>
+#include <future>
 #include <iostream>
-#include <sstream>
 #include <stdexcept>
 #include <thread>
 #ifdef _WIN32
@@ -126,7 +128,8 @@ int main(int argc, char** argv)
         {
             std::string arg = argv[i];
 
-            if (arg == "--test-cpu" || arg == "--test-gpu" || arg == "--benchmark" || arg == "--render")
+            if (arg == "--test-cpu" || arg == "--test-gpu" || arg == "--benchmark" || arg == "--render" ||
+                arg == "--test-animation" || arg == "--test-export" || arg == "--test-export-gpu")
                 mode = arg;
             else if (arg == "--no-redshift")
                 settings.redshift = false;
@@ -190,11 +193,13 @@ int main(int argc, char** argv)
                 std::cout
                     << "SchwarzschildRayTracer [--width N --height N --samples N --seed N --assets DIR]\n"
                     << "  --test-cpu | --test-gpu | --benchmark | --render\n"
+                    << "  --test-animation | --test-export | --test-export-gpu\n"
                     << "  --exposure N | --no-redshift\n"
                     << "  --slow-step N (Shift movement per tap; default 0.0005; held speed 20*N units/s)\n"
                     << "  --full-scene-integration | --adaptative (default: fixed radius)\n"
-                    << "Left-drag looks; arrows/WASD move; Q/E rise/descend; P saves; F1 toggles settings; "
-                       "Escape exits.\n";
+                    << "Left/right-drag looks; arrows/WASD move; Q/E rise/descend; P saves; F1 toggles "
+                       "interface; "
+                       "Escape stops playback or deselects.\n";
                 return 0;
             }
             else
@@ -211,7 +216,16 @@ int main(int argc, char** argv)
         if (mode == "--test-cpu")
             return rt::runCpuTests();
 
+        if (mode == "--test-animation")
+            return rt::runAnimationTests();
+        if (mode == "--test-export")
+            return rt::runExportTests(executableDirectory() / "Output");
         rt::SdlVideo video;
+        if (mode == "--test-export-gpu")
+        {
+            rt::SdlGlWindow context(1, 1, true);
+            return rt::runExportGpuTests(assets, executableDirectory() / "Output");
+        }
 
         if (mode == "--test-gpu")
         {
@@ -229,6 +243,7 @@ int main(int argc, char** argv)
 
         auto scene = rt::defaultScene(assets);
         rt::CameraData camera;
+        const rt::CameraData initialCamera = camera;
         rt::SdlGlWindow window(settings.width, settings.height);
         if (!SDL_GL_SetSwapInterval(1))
             std::cerr << "VSync unavailable: " << SDL_GetError() << '\n';
@@ -236,17 +251,28 @@ int main(int argc, char** argv)
         // Renderer is destroyed before window, while its GL context is still valid.
         rt::GpuRenderer renderer(assets);
         renderer.uploadScene(scene);
+        int drawableWidth = 0, drawableHeight = 0;
+        rt::checkSdl(SDL_GetWindowSizeInPixels(window.get(), &drawableWidth, &drawableHeight),
+                     "Get initial maximized size");
+        auto initialSize = renderer.fitResolution(drawableWidth, drawableHeight);
+        settings.width = initialSize[0];
+        settings.height = initialSize[1];
         renderer.reset(settings, camera);
         rt::SettingsPanel panel(window.get(), settings);
-        std::cout
-            << "GPU: " << renderer.device()
-            << "\nLeft-drag to look; arrows/WASD move; Q/E rise/descend; P saves; F1 toggles settings.\n";
+        rt::Timeline timeline(scene, camera);
+        std::cout << "GPU: " << renderer.device()
+                  << "\nLeft/right-drag to look; arrows/WASD move; Q/E rise/descend; P saves; F1 toggles "
+                     "settings.\n";
         bool running = true, minimized = false;
         bool focused = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS) != 0;
         bool dragging = false;
-        SDL_FPoint mousePosition{};
+        Uint8 lookButton = 0;
+        SDL_FPoint mousePosition{}, clickPosition{};
+        bool lookMoved = false;
+        bool geometryDirty = false;
         constexpr double mouseSensitivity = 0.004;
-        auto last = Clock::now(), titleTime = last;
+        auto last = Clock::now();
+        rt::checkSdl(SDL_SetWindowTitle(window.get(), "Schwarzschild Ray Tracer"), "Set window title");
         auto lastMovement = last;
         bool preview = false, cameraPending = false;
         auto activeSettings = settings;
@@ -255,17 +281,42 @@ int main(int argc, char** argv)
         bool renderSettingsPending = false;
         bool matchWindow = true;
         auto lastSettingsEdit = last;
+
+        struct ImageDestination
+        {
+            std::mutex mutex;
+            bool ready = false;
+            std::string path, error;
+        };
+
+        std::shared_ptr<ImageDestination> imageDialog;
+        std::vector<unsigned char> savedImage;
+        int savedWidth = 0, savedHeight = 0;
+        std::future<std::string> imageWrite;
         auto saveImage = [&]
         {
+            if (imageDialog || imageWrite.valid())
+                return;
             try
             {
-                auto stamp = std::chrono::duration_cast<std::chrono::microseconds>(
-                                 std::chrono::system_clock::now().time_since_epoch())
-                                 .count();
-                auto path = executableDirectory() / "Output" / ("img-" + std::to_string(stamp) + ".png");
-                renderer.saveDisplayed(path);
-                panel.setStatus("Saved " + path.u8string());
-                std::cout << "Saved " << path << std::endl;
+                // Capture the displayed image now; later camera edits cannot change the saved image.
+                savedImage = renderer.readDisplayedRgba(savedWidth, savedHeight);
+                imageDialog = std::make_shared<ImageDestination>();
+                auto* context = new std::shared_ptr<ImageDestination>(imageDialog);
+                auto callback = [](void* data, const char* const* paths, int)
+                {
+                    std::unique_ptr<std::shared_ptr<ImageDestination>> owner(
+                        static_cast<std::shared_ptr<ImageDestination>*>(data));
+                    auto& result = **owner;
+                    std::lock_guard<std::mutex> lock(result.mutex);
+                    if (!paths)
+                        result.error = SDL_GetError();
+                    else if (paths[0])
+                        result.path = paths[0];
+                    result.ready = true;
+                };
+                static const SDL_DialogFileFilter filters[] = {{"PNG image", "png"}};
+                SDL_ShowSaveFileDialog(callback, context, window.get(), filters, 1, "image.png");
             }
             catch (const std::exception& error)
             {
@@ -276,18 +327,17 @@ int main(int argc, char** argv)
         while (running)
         {
             bool reset = false, tapped = false;
+            panel.setEditingEnabled(!timeline.busy());
             SDL_Event event;
 
             while (SDL_PollEvent(&event))
             {
                 panel.processEvent(event);
-                const bool captureMouse = panel.capturesMouse();
-                const bool captureKeyboard = panel.capturesKeyboard();
+                const bool captureMouse = panel.capturesMouse() || timeline.busy();
+                const bool captureKeyboard = panel.capturesKeyboard() || timeline.busy();
                 if (captureMouse)
                     dragging = false;
-                if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED ||
-                    (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_ESCAPE &&
-                     !captureKeyboard))
+                if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
                     running = false;
 
                 if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
@@ -299,14 +349,30 @@ int main(int argc, char** argv)
                 if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED)
                     focused = true;
 
-                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT &&
-                    focused && !minimized && !captureMouse)
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+                    (event.button.button == SDL_BUTTON_LEFT || event.button.button == SDL_BUTTON_RIGHT) &&
+                    focused && !minimized && !captureMouse && !dragging &&
+                    panel.viewport().contains(event.button.x, event.button.y))
                 {
                     dragging = true;
+                    lookButton = event.button.button;
                     mousePosition = {event.button.x, event.button.y};
+                    clickPosition = mousePosition;
+                    lookMoved = lookButton == SDL_BUTTON_RIGHT;
                 }
 
-                if ((event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT) ||
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT &&
+                    dragging && lookButton == SDL_BUTTON_LEFT && !lookMoved && !captureMouse && focused &&
+                    !minimized)
+                {
+                    if (panel.viewport().contains(event.button.x, event.button.y))
+                    {
+                        auto uv = panel.viewport().imagePoint(event.button.x, event.button.y);
+                        panel.selectBody(renderer.pickDisplayed(uv.x, uv.y));
+                    }
+                }
+
+                if ((event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == lookButton) ||
                     event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE)
                     dragging = false;
 
@@ -315,6 +381,11 @@ int main(int argc, char** argv)
                 {
                     SDL_FPoint position{event.motion.x, event.motion.y};
                     SDL_FPoint delta{position.x - mousePosition.x, position.y - mousePosition.y};
+                    if (!lookMoved &&
+                        std::hypot(position.x - clickPosition.x, position.y - clickPosition.y) >= 4)
+                        lookMoved = true;
+                    if (!lookMoved)
+                        continue;
                     mousePosition = position;
 
                     if (delta.x != 0 || delta.y != 0)
@@ -383,20 +454,9 @@ int main(int argc, char** argv)
                     dragging = false;
                     minimized = (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_MINIMIZED) != 0 ||
                                 event.window.data1 <= 0 || event.window.data2 <= 0;
-
-                    if (!minimized && matchWindow)
-                    {
-                        auto size = renderer.fitResolution(int(event.window.data1), int(event.window.data2));
-                        settings.width = size[0];
-                        settings.height = size[1];
-                        panel.syncResolution(settings.width, settings.height);
-                        reset = true;
-                    }
                 }
-
-                if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_P &&
-                    !captureKeyboard && !minimized)
-                    saveImage();
+                if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)
+                    dragging = false;
             }
 
             if (!running)
@@ -405,14 +465,104 @@ int main(int argc, char** argv)
             double dt = std::min(0.05, std::chrono::duration<double>(now - last).count());
             last = now;
 
-            if (minimized)
+            if (minimized && !timeline.busy())
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
 
+            if (imageDialog)
+            {
+                bool ready = false;
+                std::string path, error;
+                {
+                    std::lock_guard<std::mutex> lock(imageDialog->mutex);
+                    ready = imageDialog->ready;
+                    path = imageDialog->path;
+                    error = imageDialog->error;
+                }
+                if (ready)
+                {
+                    imageDialog.reset();
+                    if (!error.empty())
+                        panel.setStatus("Cannot save image: " + error, true);
+                    else if (path.empty())
+                        panel.setStatus("Image save cancelled.");
+                    else
+                    {
+                        auto destination = std::filesystem::u8path(path);
+                        if (destination.extension().empty())
+                            destination += ".png";
+                        imageWrite = std::async(
+                            std::launch::async,
+                            [destination, pixels = std::move(savedImage), w = savedWidth, h = savedHeight]()
+                            {
+                                rt::saveRgbaPng(destination, w, h, pixels);
+                                return destination.u8string();
+                            });
+                        panel.setStatus("Saving image...");
+                    }
+                    savedImage.clear();
+                }
+            }
+            if (imageWrite.valid() &&
+                imageWrite.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+            {
+                try
+                {
+                    panel.setStatus("Saved " + imageWrite.get());
+                }
+                catch (const std::exception& error)
+                {
+                    panel.setStatus(error.what(), true);
+                }
+            }
+            panel.setDisplayImage(renderer.displayImage());
+            panel.setBodyAnchors(renderer.bodyAnchors());
             panel.beginFrame();
-            auto actions = panel.draw(slowMovementStep, renderer.progress(), activeSettings, preview);
+            auto actions =
+                panel.draw(slowMovementStep, renderer.progress(), activeSettings, preview, camera, scene);
+            timeline.draw(panel, settings);
+            if (actions.quit)
+                running = false;
+            if (!timeline.busy() && matchWindow && panel.viewportArea().width > 0 &&
+                panel.viewportArea().height > 0)
+            {
+                auto pixels = panel.viewportPixels();
+                auto size = renderer.fitResolution(pixels[0], pixels[1]);
+                if (size[0] != settings.width || size[1] != settings.height)
+                {
+                    settings.width = size[0];
+                    settings.height = size[1];
+                    if (pendingMatchWindow)
+                    {
+                        pendingSettings.width = size[0];
+                        pendingSettings.height = size[1];
+                    }
+                    panel.syncResolution(size[0], size[1]);
+                    reset = true;
+                }
+            }
+            if (actions.body >= 0 && actions.body < int(scene.spheres.size()))
+            {
+                auto& center = scene.spheres[actions.body].centerRadius;
+                center.x = float(actions.bodyPosition.x);
+                center.y = float(actions.bodyPosition.y);
+                center.z = float(actions.bodyPosition.z);
+                geometryDirty = true;
+                reset = true;
+            }
+            if (actions.positionChanged)
+            {
+                camera.lookAt += actions.position - camera.position;
+                camera.position = actions.position;
+                reset = true;
+            }
+            if (actions.resetCamera)
+            {
+                camera = initialCamera;
+                reset = true;
+            }
             if (actions.save)
                 saveImage();
             if (actions.renderChanged)
@@ -420,12 +570,11 @@ int main(int argc, char** argv)
                 try
                 {
                     auto requested = panel.requestedSettings();
-                    if (panel.followsWindow())
+                    if (panel.followsWindow() && panel.viewportArea().width > 0 &&
+                        panel.viewportArea().height > 0)
                     {
-                        int width = 0, height = 0;
-                        rt::checkSdl(SDL_GetWindowSizeInPixels(window.get(), &width, &height),
-                                     "Get drawable size");
-                        auto size = renderer.fitResolution(width, height);
+                        auto pixels = panel.viewportPixels();
+                        auto size = renderer.fitResolution(pixels[0], pixels[1]);
                         requested.width = size[0];
                         requested.height = size[1];
                     }
@@ -448,7 +597,7 @@ int main(int argc, char** argv)
                 }
             }
 
-            if (focused && !tapped && !panel.capturesKeyboard())
+            if (focused && !tapped && !panel.capturesKeyboard() && !timeline.busy())
             {
                 auto key = [](SDL_Keycode k)
                 {
@@ -467,70 +616,94 @@ int main(int argc, char** argv)
                 }
             }
 
+            renderer.poll();
+            bool wasBusy = timeline.busy();
+            bool animated =
+                timeline.update(scene,
+                                camera,
+                                renderer,
+                                settings,
+                                activeSettings,
+                                dragging || panel.manipulatingBody() || ImGui::IsAnyItemActive() || reset);
+            if (animated)
+            {
+                geometryDirty = true;
+                reset = true;
+            }
+            if (timeline.busy())
+            {
+                cameraPending = false;
+                renderSettingsPending = false;
+                geometryDirty = false;
+                preview = timeline.mode() == rt::AnimationMode::Playback;
+            }
+            else if (wasBusy)
+            {
+                // Force a full-quality restore, even if the last preview was interrupted.
+                preview = false;
+                cameraPending = true;
+            }
             if (reset)
             {
                 cameraPending = true;
                 lastMovement = now;
             }
 
-            renderer.poll();
-            if (renderSettingsPending && seconds(lastSettingsEdit) >= 0.15)
+            if (!timeline.busy())
             {
-                settings = pendingSettings;
-                matchWindow = pendingMatchWindow;
-                preview = false;
-                activeSettings = settings;
-                renderer.reset(activeSettings, camera);
-                cameraPending = false;
-                renderSettingsPending = false;
-                panel.setStatus("Rendering updated settings.");
-            }
-
-            // Finish each preview even if newer input arrives. Otherwise a held
-            // key would continually cancel the slow rays and no preview would finish.
-            bool settled = std::chrono::duration<double>(now - lastMovement).count() >= 0.15;
-            bool canReplace = !preview || renderer.progress().finished;
-            if (canReplace && (cameraPending || (preview && settled)))
-            {
-                preview = !settled;
-                activeSettings = settings;
-                if (preview)
+                if (renderSettingsPending && seconds(lastSettingsEdit) >= 0.15)
                 {
-                    activeSettings.width = std::max(1, settings.width / 4);
-                    activeSettings.height = std::max(1, settings.height / 4);
-                    activeSettings.samples = 1;
+                    settings = pendingSettings;
+                    matchWindow = pendingMatchWindow;
+                    preview = false;
+                    activeSettings = settings;
+                    if (geometryDirty)
+                    {
+                        renderer.updateGeometry(scene);
+                        geometryDirty = false;
+                    }
+                    renderer.reset(activeSettings, camera);
+                    cameraPending = false;
+                    renderSettingsPending = false;
+                    panel.setStatus("Rendering updated settings.", false, true);
                 }
 
-                renderer.reset(activeSettings, camera);
-                cameraPending = false;
-            }
+                // Finish each preview even if newer input arrives. Otherwise a held
+                // key would continually cancel the slow rays and no preview would finish.
+                bool settled = std::chrono::duration<double>(now - lastMovement).count() >= 0.15;
+                bool canReplace = !preview || renderer.progress().finished;
+                if (canReplace && (cameraPending || (preview && settled)))
+                {
+                    preview = !settled;
+                    activeSettings = settings;
+                    if (preview)
+                    {
+                        activeSettings.width = std::max(1, settings.width / 4);
+                        activeSettings.height = std::max(1, settings.height / 4);
+                        activeSettings.samples = 1;
+                    }
 
+                    if (geometryDirty)
+                    {
+                        renderer.updateGeometry(scene);
+                        geometryDirty = false;
+                    }
+                    renderer.reset(activeSettings, camera);
+                    cameraPending = false;
+                }
+
+            } // Ordinary progressive rendering is suspended during playback/export.
+
+            if (!minimized)
             {
-                int width = 0, height = 0;
-                rt::checkSdl(SDL_GetWindowSizeInPixels(window.get(), &width, &height), "Get drawable size");
-                renderer.present(width, height);
                 panel.render();
                 rt::checkSdl(SDL_GL_SwapWindow(window.get()), "Swap window");
             }
 
-            renderer.dispatch();
+            else
+                ImGui::EndFrame();
 
-            if (seconds(titleTime) > 0.25)
-            {
-                const auto& p = renderer.progress();
-                std::ostringstream title;
-                title << "Schwarzschild | "
-                      << (settings.integrationMode == rt::RenderSettings::FixedRadius ? "fixed radius"
-                          : settings.integrationMode == rt::RenderSettings::FullScene ? "full scene"
-                                                                                      : "adaptive cutoff")
-                      << " | " << std::fixed << std::setprecision(1) << p.meanSamples << "/"
-                      << activeSettings.samples << " spp | " << activeSettings.width << "x"
-                      << activeSettings.height << (preview ? " preview" : " refine") << " | GPU "
-                      << p.lastBatchMilliseconds << " ms | invalid " << p.failures << " | "
-                      << renderer.device();
-                rt::checkSdl(SDL_SetWindowTitle(window.get(), title.str().c_str()), "Set window title");
-                titleTime = Clock::now();
-            }
+            renderer.dispatch();
 
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }

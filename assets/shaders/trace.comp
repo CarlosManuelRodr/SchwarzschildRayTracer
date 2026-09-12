@@ -14,6 +14,7 @@ struct MaterialData
 {
     ivec4 kindTexture;
     vec4 parameters;
+    ivec4 layers;
 };
 
 struct TextureData
@@ -78,11 +79,35 @@ layout(std430, binding = 6) readonly buffer TestRays
     TestRay testRays[];
 };
 
+layout(std430, binding = 7) readonly buffer ImageTexels
+{
+    uint imageTexels[];
+};
+
 layout(rgba32f, binding = 0) uniform image2D accumulation;
+layout(r32i, binding = 1) uniform iimage2D bodyIds;
 uniform ivec2 dimensions;
 uniform int targetSamples, resetState, testMode;
 uniform int firstPassOnly;
 uniform int gravityMode;
+uniform vec3 observerBeta;
+uniform int useObserverFrame;
+uniform int observerType;
+
+bool hoveringObserver()
+{
+    return observerType == 0;
+}
+
+vec3 observerVelocity()
+{
+    return observerBeta;
+}
+
+bool observerFrameEnabled()
+{
+    return useObserverFrame != 0;
+}
 
 int integrationMode()
 {
@@ -126,6 +151,11 @@ int materialKind(int i)
 int materialTexture(int i)
 {
     return materials[i].kindTexture.y;
+}
+
+int materialLayer(int i, int layer)
+{
+    return materials[i].layers[layer];
 }
 
 real materialParameter(int i)
@@ -208,12 +238,32 @@ vec3 textureColor(int i)
     return textures[i].color.xyz;
 }
 
+vec3 imageTexel(int i, int x, int y)
+{
+    ivec4 t = textures[i].image;
+    x = (x % t.y + t.y) % t.y;
+    y = clamp(y, 0, t.z - 1);
+    if (t.w == 0)
+        return texels[t.x + x + y * t.y].xyz;
+    uint texelBits = imageTexels[t.x + x + y * t.y];
+    vec3 c = vec3(texelBits & 255u, (texelBits >> 8) & 255u, (texelBits >> 16) & 255u) / 255.0;
+    if (t.w == 1)
+        c = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), greaterThan(c, vec3(0.04045)));
+    return c;
+}
+
 vec3 imageValue(int i, real u, real v)
 {
-    ivec3 t = textures[i].image.xyz;
-    int x = clamp(int(u * float(t.y)), 0, t.y - 1),
-        y = clamp(int((1.0 - v) * float(t.z) - 0.001), 0, t.z - 1);
-    return texels[t.x + x + y * t.y].xyz;
+    ivec4 t = textures[i].image;
+    if (t.w == 0)
+        return imageTexel(
+            i, clamp(int(u * t.y), 0, t.y - 1), clamp(int((1.0 - v) * t.z - 0.001), 0, t.z - 1));
+    vec2 p = vec2(u * t.y, (1.0 - v) * t.z) - 0.5;
+    ivec2 base = ivec2(floor(p));
+    vec2 f = fract(p);
+    return mix(mix(imageTexel(i, base.x, base.y), imageTexel(i, base.x + 1, base.y), f.x),
+               mix(imageTexel(i, base.x, base.y + 1), imageTexel(i, base.x + 1, base.y + 1), f.x),
+               f.y);
 }
 
 real maximumStep()
@@ -253,6 +303,9 @@ TraceState loadState(int i)
     s.h2 = a.integration.x;
     s.step = a.integration.y;
     s.observerLapse = a.integration.z;
+    s.energy = a.integration.w;
+    s.observerMode = int(a.random.y);
+    s.body = int(a.random.z) - 1;
     s.field = a.meta.x;
     s.attempts = a.meta.y;
     s.depth = a.meta.z;
@@ -268,9 +321,9 @@ void storeState(int i, TraceState s)
     states[i].v = vec4(s.v, 0);
     states[i].throughput = vec4(s.throughput, 0);
     states[i].radiance = vec4(s.radiance, 0);
-    states[i].integration = vec4(s.h2, s.step, s.observerLapse, 0);
+    states[i].integration = vec4(s.h2, s.step, s.observerLapse, s.energy);
     states[i].meta = ivec4(s.field, s.attempts, s.depth, s.status);
-    states[i].random = uvec4(s.rng, 0, 0, 0);
+    states[i].random = uvec4(s.rng, uint(s.observerMode), uint(s.body + 1), 0);
 }
 
 void main()
@@ -286,6 +339,7 @@ void main()
     if (resetState != 0)
     {
         sum = vec4(0);
+        imageStore(bodyIds, pixel, ivec4(-1));
         initTrace(s, vec3(0), vec3(0, 0, 1), seed);
         s.status = -1;
     }
@@ -326,6 +380,15 @@ void main()
 
             if (s.status == 2)
                 atomicAdd(failed, 1u);
+            if (sum.w == 0)
+            {
+                int body = s.body;
+                if (body < 0 && s.status == 3)
+                    body = blackHole();
+                if (body >= 0 && materialKind(sphereMaterial(body)) == 6)
+                    body = -1;
+                imageStore(bodyIds, pixel, ivec4(body));
+            }
             sum += vec4(s.radiance, 1);
 
             if (testMode == 0)

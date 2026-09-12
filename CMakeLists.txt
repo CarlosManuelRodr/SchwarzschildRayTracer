@@ -15,7 +15,13 @@ find_package(GLEW REQUIRED)
 
 add_executable(SchwarzschildRayTracer
     src/Main.cpp
+    src/Animation.cpp
+    src/Timeline.cpp
+    src/FrameExport.cpp
+    src/DesktopFrameSink.cpp
+    src/AnimationTests.cpp
     src/SettingsPanel.cpp
+    src/BodyEditor.cpp
     src/SceneData.cpp
     src/StbImage.cpp
     src/Blackbody.cpp
@@ -44,6 +50,10 @@ if(WIN32 AND TARGET SDL3::SDL3-shared)
     install(FILES "$<TARGET_FILE:SDL3::SDL3-shared>" DESTINATION .)
 endif()
 
+if(WIN32)
+    target_link_libraries(SchwarzschildRayTracer PRIVATE mfplat mfreadwrite mfuuid ole32)
+endif()
+
 if(MSVC)
     target_compile_definitions(SchwarzschildRayTracer PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(SchwarzschildRayTracer PRIVATE /W4 /permissive-)
@@ -54,6 +64,10 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_test(NAME animation COMMAND SchwarzschildRayTracer --test-animation)
+    add_test(NAME export_pipeline COMMAND SchwarzschildRayTracer --test-export)
+    add_test(NAME export_gpu COMMAND SchwarzschildRayTracer --test-export-gpu)
+    set_tests_properties(export_gpu PROPERTIES LABELS "gpu" TIMEOUT 180)
     add_test(NAME cpu_reference COMMAND SchwarzschildRayTracer --test-cpu)
     add_test(NAME gpu_reference COMMAND SchwarzschildRayTracer --test-gpu)
     set_tests_properties(gpu_reference PROPERTIES LABELS "gpu" TIMEOUT 180)

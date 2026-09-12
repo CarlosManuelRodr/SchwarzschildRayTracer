@@ -1,4 +1,182 @@
 # SchwarzschildRayTracer
+
+## Workspace
+
+A fresh workspace shows only the **Viewport**, with the menu and status bars.
+Open optional panels from **View**: Scene docks left, Inspector / Camera / Render
+Settings dock right, and Timeline docks below. The viewport is always visible and
+cannot be hidden or undocked. Resize areas with the splitters.
+**View > Lock Layout** controls undocking of optional panels; **View > Reset Layout**
+returns to the viewport-only default. Existing saved layouts and panel choices
+are preserved between sessions, so use Reset Layout to try the new default.
+The status bar shows camera distance to the black-hole center and horizon radius
+on the right. Temporary render-update text clears when rendering finishes.
+
+- **File > Save Image...** (P) captures the displayed image and opens a native PNG
+  save dialog. **File > Export Animation...** opens video/sequence settings.
+- **Edit** offers animation undo/redo and deselection. Escape stops playback,
+  cancels an active export, or deselects; use **File > Exit** to close the app.
+- **View** toggles optional panels and gizmos. F1 temporarily hides the interface,
+  preserving the chosen panels and layout when restored.
+- **Help > Controls and Shortcuts** explains navigation and keyframing.
+
+Inspector edits the selected object's or camera's position. Camera navigation
+and observer physics live in **Camera**. Observer sliders include negative and
+positive velocity with an exact **Zero** button; the combined speed limit only
+clamps the edited axis. Render Settings contains image quality and resolution;
+integration and seed are under **Advanced**. Docked panels have no close buttons.
+
+Navigation operates inside the focused viewport. Fixed render resolutions retain
+their aspect ratio with letterboxing; **Match viewport resolution** follows the
+available viewport area at the display's pixel density. Images exclude UI and gizmos.
+
+## Animation timeline and video export
+
+The **Timeline** window animates body positions and the camera pose independently.
+Animation projects currently live only in memory: closing the app loses the timeline.
+
+1. Select a body in the view or its timeline row (or select **Camera**).
+2. Choose a frame using the ruler, frame field, or navigation buttons.
+3. Move the object with its existing gizmo/XYZ fields, or navigate the camera.
+4. Press **Add [object] keyframe**. At an existing key, **Update [object] keyframe** replaces that pose.
+5. Repeat at another frame. Drag a diamond to retime it, or select it and press
+   **Remove** / Delete. Keys cannot overlap within a track.
+
+Click the viewport background, an empty timeline lane/space, or **Edit > Deselect** / Escape to
+clear the selected body and hide its transform gizmo. Deselecting preserves keys
+and uncaptured poses. Select a track again before adding/removing keys; use the
+ruler to scrub without changing the track selection.
+
+Position interpolation is linear; camera orientation follows the shortest rotation.
+Outside a track's keys, the nearest key is held. A track with no keys stays at its
+base pose. The first key does not create an implicit key at frame zero.
+Edits to animated tracks show **Pose not captured** until captured. Seeking, playing,
+or exporting discards these edits; **Revert poses** discards them immediately, and Undo can recover them. Unanimated tracks remain
+editable as static objects. The history retains 100 commands, grouping each drag
+or navigation gesture. Ctrl+Z/Ctrl+Y undo/redo when not editing text; Space toggles
+playback when the timeline has focus. F1 hides/shows panels and gizmos.
+
+The default is 300 frames at 30 FPS (frames 0–299, ten seconds). **Animation settings > Apply**
+changes the frame count/FPS; FPS changes preserve key frame numbers. Move/remove
+outlying keys before reducing the frame count. Resize the Timeline window, use
+Zoom, and scroll horizontally to navigate longer clips.
+
+**Play** renders every frame at quarter resolution and one sample. Expensive frames
+slow playback rather than being skipped. Pausing refines the current frame.
+
+**Export...** offers numbered PNG frames or H.264 MP4, with destination, resolution,
+sample count, and bitrate (default 20 Mbps). It uses committed render settings,
+the same seed for each frame, and all timeline frames. MP4 dimensions must be even.
+Choose a new destination; existing files/directories are never silently replaced.
+Press **Choose location and export...** to open the native Save dialog for MP4,
+or a parent-folder picker for PNG sequences (a new animation subfolder is created).
+Cancelling the picker returns to export settings without rendering or creating files.
+
+- Windows MP4 uses the system Media Foundation encoder; no FFmpeg installation is
+  needed. If media features/encoding are unavailable, the app reports the error
+  before rendering and PNG export is still available.
+- Linux MP4 uses `ffmpeg` from `PATH` with `libx264` and the `color` source filter.
+  The backend performs an encoder/configuration preflight before scene rendering.
+  Native Linux validation is deferred to a future Linux session.
+- PNG exports use `frame-000000.png` onward in a new directory. Completed PNGs
+  remain after cancellation. MP4 exports publish only after finalization and
+  remove incomplete temporary output when cancelled.
+
+The UI remains responsive during export, including Cancel, and exporting continues
+while minimized. Scene editing is locked until completion/cancellation, after which
+the pre-export playhead pose and interactive rendering settings are restored.
+Images use the same color processing as Save Image and contain no ImGui overlays.
+
+The portable `FrameSink` interface consumes top-down RGBA8 frames with frame indices
+and rational timestamps. It supports asynchronous startup, bounded submission,
+progress, finalization, and cancellation. `FrameExport` owns frame ordering and
+backpressure without platform APIs; desktop file/process/COM details stay in
+`DesktopFrameSink`. A future WebCodecs sink can implement this same contract.
+
+Validation commands: `--test-animation`, `--test-export`, and `--test-export-gpu`.
+The export test checks Media Foundation encoding/decoding only on Windows. CTest
+also includes the existing CPU/GPU reference suites. Test outputs are placed in
+unique directories under the executable's `Output` folder.
+
+## Texture credits
+
+The realistic Earth textures (day, night, clouds, normal and specular maps) and
+Sun texture were created by [Solar System Scope](https://www.solarsystemscope.com/textures/)
+and are licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
+The TIFF data maps were converted to lossless PNG runtime copies with identical
+RGB pixels for use in this app.
+
+## Experiment playground
+
+Click Earth, Moon, Sun, the black-hole shadow, or its accretion disk to select it.
+Picking traces the light path using the displayed camera and scene, including lensing.
+The **Inspector** provides exact world XYZ coordinates and **Reset position** to restore that body's startup position.
+
+Drag the red X, green Y or blue Z arrow to translate along a world axis. Drag the
+yellow center to translate in the view plane. The gizmo origin is anchored to the
+largest visible image of the selected body using the renderer's first-sample body
+IDs, including observer aberration and gravitational lensing. With multiple lensed
+images, the largest connected image is used. Arrows remain world-axis editing
+directions, not bent light rays. Invisible bodies have no gizmo but remain editable
+through the panel. Anchors update only when a complete new view is displayed.
+Left-drag elsewhere or right-drag rotates the camera. Right-drag never selects or moves bodies. F1 hides the panels and gizmo.
+Moving the black hole also moves its accretion disk and gravity field. Other bodies
+move independently. Scene edits restart progressive rendering without reloading textures.
+
+## Updated scene assets
+
+The black hole is at `(0, 0, 0)`. Earth remains 7 scene units from it; the Sun's
+position is `(8, 4, 2)`, preserving its previous distance and relative placement.
+The camera and background were translated by the same offset. Interactive windows
+start maximized; hidden validation/render windows remain unchanged.
+
+Earth uses the supplied day, night, cloud, normal and specular maps. Solar elevation
+smoothly enables city emission across the night-side terminator. Clouds blend over
+the surface and attenuate city lights; they are a surface coverage approximation,
+not a separate weather simulation. Normal and specular maps are linear data;
+color textures decode from sRGB before bilinear filtering, with wrapped longitude.
+The TIFF data maps have lossless PNG runtime copies with identical RGB pixels.
+All supplied image resolutions are retained (the Sun file is 4096 x 2048).
+
+The Moon is 0.2727 Earth radii, matching the [physical size ratio](https://science.nasa.gov/moon/by-the-numbers/).
+Its separation is deliberately compressed for the illustrative composition;
+Earth and Moon both receive direct sunlight, disk illumination and cast shadows.
+The Sun map's luminance modulates thermal emission with limb darkening; its orange
+false color does not tint the illumination. Lower Exposure to inspect the solar
+surface; at normal scene exposure the photosphere saturates white. An optically
+thin emissive halo follows the ray segments, so it can be occluded and lensed.
+Its brightness and streamers are artistic corona approximations, not a plasma model.
+
+High-resolution images use packed RGB bytes in GPU storage instead of four floats
+per pixel. The full texture set needs roughly 0.8 GiB, plus ray state and framebuffers;
+a GPU with a smaller per-buffer storage limit reports an explicit error.
+
+## Observer velocity and views inside the horizon
+
+**Camera > Observer physics** offers **Hovering** (default) and **Freely falling** observers.
+Velocity is view-relative: **Right/Left**, **Up/Down**, and **Forward/Backward**.
+The directions rotate with the view, including pitch. Hovering at zero velocity
+preserves the original exterior image exactly; freely falling at zero means a
+rain observer falling from rest at infinity. The combined speed is constrained to **0.999c** because a
+camera rest frame does not exist at exactly c. The camera stays where you place
+it; changing velocity modifies aberration and the measured color/brightness.
+
+Observer types never switch automatically. Hovering is undefined at or inside
+the horizon and displays black with an explanation in the panel. Select Freely
+falling explicitly to visualize the interior; it uses full integration there.
+Outside, the selected integration mode is retained. Freely falling with full-scene
+integration on both sides provides a consistent horizon crossing.
+
+The Inspector edits world position; Camera shows view-relative velocity and distance
+to the black-hole center. The horizon radius is 1 scene unit. **Reset camera pose**
+restores the startup camera without changing observer velocity or render settings.
+F1 hides or restores the workspace.
+
+See [Observer and horizon equations](docs/observer-and-horizon.md) for the English
+derivation, reference-frame conventions, frequency shifts, validation, and model
+limitations. Interior light sources and gravitational collapse history are not
+modeled; some past directions therefore remain dark. Exposure can help inspect
+faint incoming light.
 Ray tracer con desviación relativista de rayos de luz basado en la métrica de Schwarzschild.
 
 El renderizador actual usa **OpenGL 4.3 compute shaders** para trazar los rayos,
@@ -66,25 +244,23 @@ WebAssembly y un backend compatible con navegador quedan para una etapa posterio
 
 ## Uso
 
-Al iniciar se abre una ventana de **1440×900** con un panel **Dear ImGui** sobre el render. Los cambios válidos
-se aplican automáticamente; las opciones de render reinician las muestras tras
-150 ms sin editar, conservando la última imagen completa. No hay botón de aplicar.
+Al iniciar se abre una ventana maximizada con paneles acoplados: **Scene**, **Viewport**,
+**Inspector**, **Camera**, **Render Settings** y **Timeline**. Los cambios válidos se
+aplican automáticamente; las opciones de render reinician las muestras tras 150 ms
+sin editar, conservando la última imagen completa.
 
-- **Rendering:** selector de integración (Fixed radius, Full scene, Adaptive cutoff),
-  redshift, muestras y exposición.
-- **Resolution and sampling:** semilla y resolución. Desactiva *Match window resolution*
-  para elegir una resolución interna independiente del tamaño de la ventana.
-- **Navigation:** deslizador logarítmico de *Slow step*. Ctrl+clic permite escribir
-  en el deslizador; *Step value* admite valores exactos (0 < valor < 0.05).
-  La velocidad de precisión cambia inmediatamente, sin reiniciar el render.
-- **Save PNG:** exporta la imagen mostrada, sin incluir el panel. Los errores y la
-  ruta del archivo aparecen en el panel.
+- **Render Settings:** muestras, exposición, resolución y redshift. Integración y
+  semilla se encuentran en **Advanced**. *Match viewport resolution* sigue el área
+  disponible del visor; una resolución fija conserva su proporción.
+- **Camera:** navegación de precisión y velocidad física del observador. Ctrl+clic
+  en un deslizador permite introducir un valor exacto.
+- **File > Save Image...:** abre un diálogo para guardar la imagen PNG sin interfaz.
+- **View:** muestra/oculta paneles, bloquea el acoplamiento y restaura la distribución.
+  **F1** oculta/restaura temporalmente la interfaz completa. La distribución se guarda.
 
-La flecha del título colapsa el panel; **F1** lo oculta o vuelve a mostrar, incluso
-si se cerró con X. Las secciones también se pueden colapsar. Mientras se editan
-controles, el teclado y el ratón quedan capturados por la interfaz y no mueven
-la cámara. `SettingsPanel` mantiene los widgets y sus valores separados del bucle
-de render, para añadir nuevas secciones sin mezclar su código con OpenGL.
+El teclado de navegación funciona con el visor enfocado. Los controles y atajos
+están descritos en **Help > Controls and Shortcuts**.
+
 
 Las opciones de consola se conservan para compatibilidad, configuración inicial,
 pruebas y renders por lotes; el uso interactivo no necesita argumentos:
@@ -134,9 +310,9 @@ el benchmark CPU. La ventana interactiva conserva la exportación manual con P.
 | ← / A, → / D | Desplazarse lateralmente respecto a la vista |
 | Q / E | Subir / bajar la cámara y su objetivo |
 | Shift + flechas / WASD / Q / E | Movimiento de precisión (100 veces más lento por defecto) |
-| P | Guardar las muestras disponibles como PNG en `Output/`, junto al ejecutable |
-| F1 | Ocultar / mostrar el panel de ajustes |
-| Escape | Salir (si la interfaz no está capturando el teclado) |
+| P | Elegir ubicación y guardar la imagen mostrada como PNG |
+| F1 | Ocultar / restaurar la interfaz |
+| Escape | Detener reproducción, cancelar exportación o deseleccionar |
 
 Durante la navegación se calculan vistas previas de una muestra a un cuarto del
 ancho y alto de render (200×150 para una ventana de 800×600). Solo se muestran al
