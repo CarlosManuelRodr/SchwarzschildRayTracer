@@ -12,19 +12,85 @@ Timeline::Timeline(const SceneData& scene, const CameraData& camera) : editor(sc
 
 Timeline::~Timeline() = default;
 
+void Timeline::chooseDestination(SDL_Window* window)
+{
+    if (dialogPending)
+        return;
+    message.clear();
+    dialogResult = std::make_shared<DialogResult>();
+    dialogPending = true;
+    // SDL may invoke this callback on another thread, even after Timeline is destroyed.
+    // Transfer a shared result holder to the callback instead of capturing this.
+    auto* context = new std::shared_ptr<DialogResult>(dialogResult);
+    auto callback = [](void* userdata, const char* const* files, int)
+    {
+        std::unique_ptr<std::shared_ptr<DialogResult>> owner(
+            static_cast<std::shared_ptr<DialogResult>*>(userdata));
+        auto& result = **owner;
+        std::lock_guard<std::mutex> lock(result.mutex);
+        if (!files)
+            result.error = SDL_GetError();
+        else if (files[0])
+            result.path = files[0];
+        result.ready = true;
+    };
+    if (format == 1)
+    {
+        static const SDL_DialogFileFilter filters[] = {{"MP4 video", "mp4"}};
+        SDL_ShowSaveFileDialog(callback, context, window, filters, 1, destination.c_str());
+    }
+    else
+    {
+        auto parent = std::filesystem::u8path(destination).parent_path().u8string();
+        SDL_ShowOpenFolderDialog(callback, context, window, parent.c_str(), false);
+    }
+}
+
+void Timeline::receiveDestination()
+{
+    if (!dialogPending)
+        return;
+    std::string path, error;
+    {
+        std::lock_guard<std::mutex> lock(dialogResult->mutex);
+        if (!dialogResult->ready)
+            return;
+        path = dialogResult->path;
+        error = dialogResult->error;
+    }
+    dialogPending = false;
+    refreshAfterDialog = true;
+    dialogResult.reset();
+    if (!error.empty() || path.empty())
+    {
+        message = error.empty() ? "Export cancelled; no files were created."
+                                : "Cannot open export dialog: " + error;
+        reopenExport = true;
+        return;
+    }
+    auto chosen = std::filesystem::u8path(path);
+    if (format == 0)
+        chosen /= std::filesystem::u8path(destination).stem();
+    else if (chosen.extension().empty())
+        chosen += ".mp4";
+    destination = chosen.u8string();
+    actions.push_back({Export});
+}
+
 void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
 {
     actions.clear();
-    if (panel.selectedBodyIndex() != lastBody)
+    receiveDestination();
+    if (panel.selectionRevision() != lastSelectionRevision)
     {
-        lastBody = panel.selectedBodyIndex();
-        if (lastBody >= 0)
-            editor.selectBody(lastBody);
+        editor.selectBody(panel.selectedBodyIndex());
+        lastSelectionRevision = panel.selectionRevision();
+        draggingKey = -1;
     }
-    else if (panel.selectedBodyIndex() != editor.clip.tracks[editor.selectedTrack].body)
+    else if (panel.selectedBodyIndex() != editor.selectedBody())
     {
-        lastBody = editor.clip.tracks[editor.selectedTrack].body;
-        panel.selectBody(lastBody);
+        panel.selectBody(editor.selectedBody());
+        lastSelectionRevision = panel.selectionRevision();
     }
     if (!panel.isVisible())
         return;
@@ -58,7 +124,7 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
         ImGui::End();
         return;
     }
-    const bool exporting = currentMode == AnimationMode::Export;
+    const bool exporting = currentMode == AnimationMode::Export || dialogPending;
     const bool playing = currentMode == AnimationMode::Playback;
     bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     bool typing = ImGui::GetIO().WantTextInput || ImGui::IsAnyItemActive();
@@ -72,28 +138,34 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
     button(playing ? "Pause" : "Play", Play);
     button("< Frame", Seek, editor.frame - 1);
     button("Frame >", Seek, editor.frame + 1);
-    auto& track = editor.clip.tracks[editor.selectedTrack];
+    const auto* track = editor.hasSelection() ? &editor.clip.tracks[editor.selectedTrack] : nullptr;
     int previous = 0, next = editor.clip.frames - 1;
-    for (const auto& key : track.keys)
-    {
-        if (key.frame < editor.frame)
-            previous = key.frame;
-        if (key.frame > editor.frame)
+    if (track)
+        for (const auto& key : track->keys)
         {
-            next = key.frame;
-            break;
+            if (key.frame < editor.frame)
+                previous = key.frame;
+            if (key.frame > editor.frame)
+            {
+                next = key.frame;
+                break;
+            }
         }
-    }
+    ImGui::BeginDisabled(!track);
     button("< Key", Seek, previous);
     button("Key >", Seek, next);
+    ImGui::EndDisabled();
     ImGui::SetNextItemWidth(160);
     int frame = editor.frame;
     if (ImGui::InputInt("Frame", &frame))
         actions.push_back({Seek, frame});
     ImGui::EndDisabled();
     ImGui::BeginDisabled(busy());
-    button(track.keyAt(editor.frame) < 0 ? "Add Keyframe" : "Update Keyframe", Capture);
+    ImGui::BeginDisabled(!track);
+    button(!track || track->keyAt(editor.frame) < 0 ? "Add Keyframe" : "Update Keyframe", Capture);
     button("Remove Keyframe", Remove);
+    button("Deselect", Select, -1);
+    ImGui::EndDisabled();
     ImGui::BeginDisabled(!editor.canUndo());
     button("Undo", Undo);
     ImGui::EndDisabled();
@@ -106,8 +178,10 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
         height = committed.height;
         samples = committed.samples;
         auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
-        std::snprintf(
-            destination, sizeof(destination), "Output/animation-%lld.mp4", static_cast<long long>(stamp));
+        const char* videos = SDL_GetUserFolder(SDL_FOLDER_VIDEOS);
+        destination = ((videos ? std::filesystem::u8path(videos) : std::filesystem::current_path()) /
+                       ("animation-" + std::to_string(stamp) + ".mp4"))
+                          .u8string();
         format = 1;
         ImGui::OpenPopup("Export animation");
     }
@@ -213,13 +287,13 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
                     hit = true;
                 }
             }
-            if (!exporting && !hit && draggingKey < 0 && ImGui::IsItemActive())
-            {
-                actions.push_back({Select, i});
-                actions.push_back({Seek, mouseFrame()});
-            }
+            if (!exporting && !hit && draggingKey < 0 && ImGui::IsItemClicked())
+                actions.push_back({Select, -1});
             ImGui::PopID();
         }
+        if (!exporting && ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered() &&
+            !ImGui::IsAnyItemActive() && ImGui::IsMouseClicked(0))
+            actions.push_back({Select, -1});
         if (draggingKey >= 0)
         {
             if (ImGui::IsMouseDragging(0, 4))
@@ -249,15 +323,24 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
                     2);
     }
     ImGui::EndChild();
+    if (reopenExport)
+    {
+        ImGui::OpenPopup("Export animation");
+        reopenExport = false;
+    }
     if (ImGui::BeginPopupModal("Export animation", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
     {
         if (ImGui::Combo("Format", &format, "PNG sequence\0MP4 (H.264)\0"))
         {
             std::filesystem::path path = std::filesystem::u8path(destination);
             path.replace_extension(format == 1 ? ".mp4" : "");
-            std::snprintf(destination, sizeof(destination), "%s", path.u8string().c_str());
+            destination = path.u8string();
         }
-        ImGui::InputText(format == 1 ? "Output file" : "New output folder", destination, sizeof(destination));
+        ImGui::TextUnformatted(
+            format == 1 ? "Choose a filename and location in the Save dialog."
+                        : "Choose a parent folder; frames will be saved in a new animation subfolder.");
+        if (!message.empty())
+            ImGui::TextWrapped("%s", message.c_str());
         ImGui::InputInt("Width", &width);
         ImGui::InputInt("Height", &height);
         ImGui::InputInt("Samples per pixel", &samples);
@@ -266,10 +349,10 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
         ImGui::Text("%d frames at %d FPS. Uses committed render settings and seed.",
                     editor.clip.frames,
                     editor.clip.fps);
-        if (ImGui::Button("Start export"))
+        if (ImGui::Button("Choose location and export..."))
         {
-            actions.push_back({Export});
             ImGui::CloseCurrentPopup();
+            chooseDestination(SDL_GL_GetCurrentWindow());
         }
         ImGui::SameLine();
         if (ImGui::Button("Close"))
@@ -280,9 +363,9 @@ void Timeline::draw(SettingsPanel& panel, const RenderSettings& committed)
     for (const auto& a : actions)
         if (a.command == Select)
         {
-            int body = editor.clip.tracks[a.value].body;
+            int body = a.value >= 0 ? editor.clip.tracks[a.value].body : -1;
             panel.selectBody(body);
-            lastBody = body;
+            lastSelectionRevision = panel.selectionRevision();
         }
 }
 
@@ -341,7 +424,8 @@ bool Timeline::update(SceneData& scene,
                       RenderSettings& active,
                       bool gesture)
 {
-    bool changed = false;
+    bool changed = refreshAfterDialog;
+    refreshAfterDialog = false;
     if (!busy())
     {
         editor.observe(scene, camera);
@@ -357,6 +441,8 @@ bool Timeline::update(SceneData& scene,
             case Select:
                 editor.selectedTrack = a.value;
                 editor.selectedKey = -1;
+                if (a.value < 0)
+                    draggingKey = -1;
                 break;
             case Seek:
                 currentMode = AnimationMode::Editing;
@@ -424,6 +510,8 @@ bool Timeline::update(SceneData& scene,
         catch (const std::exception& e)
         {
             message = e.what();
+            if (a.command == Export)
+                reopenExport = true;
             changed = true;
         }
     }

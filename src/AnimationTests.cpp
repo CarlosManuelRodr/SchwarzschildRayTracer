@@ -208,6 +208,13 @@ int runAnimationTests()
     auto scene = fixture();
     CameraData camera;
     AnimationEditor e(scene, camera);
+    e.selectBody(0);
+    require(e.selectedBody() == 0, "Body track selection failed");
+    e.selectBody(-1);
+    require(!e.hasSelection() && e.selectedKey == -1, "Background must clear track and key selection");
+    e.capture();
+    e.remove();
+    require(!e.retime(0, 1) && !e.canUndo(), "Deselected key commands must not mutate animation history");
     e.selectedTrack = 1;
     require(e.clip.frames == 300 && e.clip.fps == 30, "Wrong timeline defaults");
     require(e.clip.tracks[1].evaluate(100).position.x == 0, "Empty track base");
@@ -221,6 +228,9 @@ int runAnimationTests()
     e.observe(scene, camera);
     e.endGesture();
     require(e.hasDrafts(), "Animated edit must be a draft");
+    e.selectBody(-1);
+    require(e.hasDrafts(), "Deselecting must preserve uncaptured pose edits");
+    e.selectBody(0);
     e.capture();
     require(e.clip.tracks[1].evaluate(5).position.x == 7, "Linear interpolation");
     require(e.clip.tracks[1].evaluate(-1).position.x == 2 && e.clip.tracks[1].evaluate(99).position.x == 12,

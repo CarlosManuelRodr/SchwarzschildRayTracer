@@ -47,6 +47,7 @@ class SettingsPanel
     {
         return selectedBody;
     }
+    std::uint64_t selectionRevision() const { return bodySelectionRevision; }
 
     bool isVisible() const
     {
@@ -86,6 +87,7 @@ class SettingsPanel
     void processGizmoEvent(const SDL_Event&);
     std::vector<Vec3> bodyAnchors;
     int selectedBody = -1;
+    std::uint64_t bodySelectionRevision = 0;
     int dragAxis = -1; // XYZ or 3 for translation in the view plane.
     bool editorOpen = false, gizmoVisible = false, bodyEditPending = false;
     SDL_FPoint gizmoOrigin{}, dragStart{};

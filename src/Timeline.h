@@ -3,6 +3,7 @@
 #include "FrameExport.h"
 #include "SettingsPanel.h"
 #include <chrono>
+#include <mutex>
 
 namespace rt
 {
@@ -26,7 +27,7 @@ class Timeline
 
     bool busy() const
     {
-        return currentMode != AnimationMode::Editing;
+        return currentMode != AnimationMode::Editing || dialogPending;
     }
 
     void draw(SettingsPanel&, const RenderSettings& committed);
@@ -63,14 +64,27 @@ class Timeline
     std::unique_ptr<FrameExport> job;
     AnimationClip exportClip;
     RenderSettings exportSettings;
-    int returnFrame = 0, lastBody = -2;
+    int returnFrame = 0;
+    std::uint64_t lastSelectionRevision = 0;
     bool frameStarted = false;
     std::chrono::steady_clock::time_point frameStart;
     float pixelsPerFrame = 8;
     int draggingKey = -1, dragDestination = -1;
     bool keyMoved = false;
     int draftFrames = 300, draftFps = 30;
-    char destination[1024]{};
+    std::string destination;
+
+    struct DialogResult
+    {
+        std::mutex mutex;
+        bool ready = false;
+        std::string path, error;
+    };
+
+    std::shared_ptr<DialogResult> dialogResult;
+    bool dialogPending = false, reopenExport = false, refreshAfterDialog = false;
+    void chooseDestination(SDL_Window* window);
+    void receiveDestination();
     int format = 1, width = 1920, height = 1080, samples = 30;
     float bitrate = 20;
     std::string message;

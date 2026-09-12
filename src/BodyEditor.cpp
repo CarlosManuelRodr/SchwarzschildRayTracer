@@ -43,6 +43,7 @@ bool finitePosition(Vec3 p)
 
 void SettingsPanel::selectBody(int body)
 {
+    ++bodySelectionRevision;
     selectedBody = body;
     editorOpen = body >= 0;
     if (editorOpen)

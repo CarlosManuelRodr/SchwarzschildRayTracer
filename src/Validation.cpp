@@ -2,6 +2,7 @@
 #include "GpuRenderer.h"
 #include "SdlSupport.h"
 #include "SettingsPanel.h"
+#include "Timeline.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -812,6 +813,22 @@ int runGpuTests(const std::filesystem::path& assets)
         press.type = SDL_EVENT_MOUSE_BUTTON_UP;
         panel.processEvent(press);
         require(!panel.manipulatingBody(), "Releasing the handle must restore navigation");
+        Timeline timeline(editedScene, editCamera);
+        auto timelineFrame = [&]
+        {
+            panel.beginFrame();
+            panel.draw(slowStep, gpu.progress(), editSettings, false, editCamera, editedScene);
+            timeline.draw(panel, editSettings);
+            auto active = editSettings;
+            timeline.update(editedScene, editCamera, gpu, editSettings, active, false);
+            panel.render();
+        };
+        timelineFrame();
+        panel.selectBody(-1); // The viewport's existing background-pick action.
+        timelineFrame();
+        timelineFrame(); // Regression: the previous timeline reselected the body here.
+        require(panel.selectedBodyIndex() == -1 && !panel.manipulatingBody(),
+                "Timeline must preserve background deselection across frames");
     }
     std::cout << "GPU tests passed: trajectories, materials/textures, deterministic rendering, "
                  "cancellation/resize, presentation, PNG, missing assets.\n";

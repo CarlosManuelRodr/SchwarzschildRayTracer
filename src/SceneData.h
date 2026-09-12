@@ -171,7 +171,7 @@ struct RenderSettings
         FreelyFalling
     };
 
-    ObserverType observerType = Hovering;
+    ObserverType observerType = FreelyFalling;
     Vec3 observerVelocity{0, 0, 0}; // View-local right/up/forward, in units of c.
     bool useObserverFrame = true;   // False only for legacy numerical reference fixtures.
 

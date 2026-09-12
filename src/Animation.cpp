@@ -245,6 +245,8 @@ void AnimationEditor::seek(int destination)
 
 void AnimationEditor::capture()
 {
+    if (!hasSelection())
+        return;
     endGesture();
     checkpoint();
     auto& t = clip.tracks.at(selectedTrack);
@@ -268,6 +270,8 @@ void AnimationEditor::capture()
 
 void AnimationEditor::remove()
 {
+    if (!hasSelection())
+        return;
     endGesture();
     auto& t = clip.tracks.at(selectedTrack);
     int k = t.keyAt(selectedKey >= 0 ? selectedKey : frame);
@@ -281,6 +285,8 @@ void AnimationEditor::remove()
 
 bool AnimationEditor::retime(int from, int to)
 {
+    if (!hasSelection())
+        return false;
     endGesture();
     auto& t = clip.tracks.at(selectedTrack);
     int k = t.keyAt(from);
@@ -344,6 +350,10 @@ void AnimationEditor::redo()
 
 void AnimationEditor::selectBody(int body)
 {
+    selectedTrack = -1;
+    selectedKey = -1;
+    if (body < 0)
+        return; // A background click must not implicitly select the camera.
     for (int i = 0; i < int(clip.tracks.size()); ++i)
         if (clip.tracks[i].body == body)
         {

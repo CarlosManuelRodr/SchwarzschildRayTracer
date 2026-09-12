@@ -12,6 +12,11 @@ Animation projects currently live only in memory: closing the app loses the time
 5. Repeat at another frame. Drag a diamond to retime it, or select it and press
    **Remove Keyframe** / Delete. Keys cannot overlap within a track.
 
+Click the viewport background, an empty timeline lane/space, or **Deselect** to
+clear the selected body and hide its transform gizmo. Deselecting preserves keys
+and uncaptured poses. Select a track again before adding/removing keys; use the
+ruler to scrub without changing the track selection.
+
 Position interpolation is linear; camera orientation follows the shortest rotation.
 Outside a track's keys, the nearest key is held. A track with no keys stays at its
 base pose. The first key does not create an implicit key at frame zero.
@@ -33,7 +38,9 @@ slow playback rather than being skipped. Pausing refines the current frame.
 sample count, and bitrate (default 20 Mbps). It uses committed render settings,
 the same seed for each frame, and all timeline frames. MP4 dimensions must be even.
 Choose a new destination; existing files/directories are never silently replaced.
-Relative destinations resolve against the application's working directory.
+Press **Choose location and export...** to open the native Save dialog for MP4,
+or a parent-folder picker for PNG sequences (a new animation subfolder is created).
+Cancelling the picker returns to export settings without rendering or creating files.
 
 - Windows MP4 uses the system Media Foundation encoder; no FFmpeg installation is
   needed. If media features/encoding are unavailable, the app reports the error

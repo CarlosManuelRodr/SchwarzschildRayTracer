@@ -73,6 +73,17 @@ class AnimationEditor
     }
 
     void selectBody(int body);
+
+    bool hasSelection() const
+    {
+        return selectedTrack >= 0 && selectedTrack < int(clip.tracks.size());
+    }
+
+    int selectedBody() const
+    {
+        return hasSelection() ? clip.tracks[selectedTrack].body : -1;
+    }
+
     bool hasDrafts() const;
 
   private:
