@@ -60,7 +60,7 @@ namespace rt
          * @param unitsPerSecond Destination clock rate, e.g. 10,000,000 for 100 ns ticks.
          * @param offset 0 for the frame start, 1 for the end; timeDenominator must be positive.
          */
-        std::int64_t boundary(std::int64_t unitsPerSecond, int offset = 0) const;
+        [[nodiscard]] std::int64_t boundary(std::int64_t unitsPerSecond, int offset = 0) const;
     };
 
     /**
@@ -115,7 +115,7 @@ namespace rt
         /**
          * @brief Return a synchronized progress snapshot without waiting for encoding to finish.
          */
-        virtual SinkProgress poll() const = 0;
+        [[nodiscard]] virtual SinkProgress poll() const = 0;
 
         /**
          * @brief Request finalization after queued frames are written; observe completion with poll.
@@ -179,17 +179,17 @@ namespace rt
         /**
          * @brief Whether the sink has completed, failed, or acknowledged cancellation.
          */
-        bool done() const;
+        [[nodiscard]] bool done() const;
 
         /**
          * @brief Return the current sink status, written frame count, and error.
          */
-        SinkProgress progress() const;
+        [[nodiscard]] SinkProgress progress() const;
 
         /**
          * @brief Return the zero-based next frame index, or the frame count after all submissions.
          */
-        int frame() const
+        [[nodiscard]] int frame() const
         {
             return index;
         }

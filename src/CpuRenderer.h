@@ -59,4 +59,4 @@ namespace rt
      * @brief Compare GPU output with the CPU reference using the supplied shader assets.
      */
     int runGpuTests(const std::filesystem::path &assets);
-} // namespace rt
+}

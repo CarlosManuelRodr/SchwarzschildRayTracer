@@ -75,7 +75,7 @@ namespace rt
          *
          * Inputs are lower-left normalized image coordinates; returns -1 for no selectable body.
          */
-        int pickDisplayed(double u, double v) const;
+        [[nodiscard]] int pickDisplayed(double u, double v) const;
 
         /**
          * @brief Return one image-space gizmo anchor per sphere, indexed by stable body ID.
@@ -83,7 +83,7 @@ namespace rt
          * Each anchor is (u,v,visible), with lower-left UVs and visible equal to 0 or 1.
          * Anchors lie on the largest connected first-pass image and publish with that image.
          */
-        const std::vector<Vec3> &bodyAnchors() const;
+        [[nodiscard]] const std::vector<Vec3> &bodyAnchors() const;
 
         /**
          * @brief Validate camera/settings and restart accumulation after any view or scene change.
@@ -95,7 +95,7 @@ namespace rt
         /**
          * @brief Fit a requested resolution within texture and ray-state buffer limits.
          */
-        std::array<int, 2> fitResolution(int width, int height) const;
+        [[nodiscard]] std::array<int, 2> fitResolution(int width, int height) const;
 
         /**
          * @brief Submit one bounded GPU batch without waiting for its completion.
@@ -154,15 +154,15 @@ namespace rt
         /**
          * @brief Return the latest polled statistics; this accessor does not synchronize.
          */
-        const GpuProgress &progress() const;
+        [[nodiscard]] const GpuProgress &progress() const;
 
         /**
          * @brief Return the detected OpenGL device description.
          */
-        const std::string &device() const;
+        [[nodiscard]] const std::string &device() const;
 
     private:
         struct Impl;
         std::unique_ptr<Impl> impl;
     };
-} // namespace rt
+}

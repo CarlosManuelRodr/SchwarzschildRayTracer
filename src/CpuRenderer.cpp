@@ -1,3 +1,4 @@
+// ReSharper disable CppDeclaratorNeverUsed
 #include "CpuRenderer.h"
 #include <algorithm>
 #include <atomic>
