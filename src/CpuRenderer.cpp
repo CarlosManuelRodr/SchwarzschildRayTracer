@@ -57,6 +57,17 @@ namespace rt
             return {c.x, c.y, c.z};
         }
 
+        static vec3 bodyToWorld(int i, vec3 v)
+        {
+            return rotateVector(bodyRotation(scene->spheres[i]), v);
+        }
+
+        static vec3 worldToBody(int i, vec3 v)
+        {
+            auto q = bodyRotation(scene->spheres[i]);
+            return rotateVector({-q.x, -q.y, -q.z, q.w}, v);
+        }
+
         static real sphereRadius(const int i)
         {
             return scene->spheres[i].centerRadius.w;
@@ -121,7 +132,8 @@ namespace rt
 
         static vec3 diskNormal()
         {
-            return normalized(scene->disk.normal);
+            return blackHole() >= 0 ? bodyToWorld(blackHole(), normalized(scene->disk.normal))
+                                    : normalized(scene->disk.normal);
         }
 
         static real diskInner()

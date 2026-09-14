@@ -30,14 +30,38 @@ Navigation operates inside the focused viewport. Fixed render resolutions retain
 their aspect ratio with letterboxing; **Match viewport resolution** follows the
 available viewport area at the display's pixel density. Images exclude UI and gizmos.
 
+## Object transforms and interaction tools
+
+Choose a tool in **Inspector > Interaction tool**:
+
+- **Pointer** selects bodies and provides the existing translation arrows and center handle.
+  Left-drag outside the handles looks around; a click selects a body.
+- **Hand** left-drags a body directly in the camera's view plane, without grabbing a handle.
+- **Rotate** selects bodies and displays red X, green Y, and blue Z rotation rings.
+  Drag a ring to rotate about that world axis. Right-drag looks around in every tool.
+
+The Inspector accepts **Rotation (degrees)** around X, Y, and Z. These describe
+`Rz * Ry * Rx`: X is applied first, then Y, then Z. Equivalent angle triples may
+appear after a gizmo rotation, especially near Euler gimbal lock. The stored
+orientation uses a quaternion, so rotation and animation remain continuous.
+**Reset position** and **Reset rotation** restore those parts of the original pose
+independently. Transform edits participate in timeline capture and Undo/Redo.
+
+Rotating Earth, Moon, or Sun turns its surface textures; Earth's normal map turns
+with them. Rotating the black hole turns its accretion disk, including its emission
+pattern. It does not turn the spherical Schwarzschild gravitational field into a
+spinning (Kerr) black hole. Gizmo centers follow the rendered body image in both
+observer modes; the handles show world editing axes rather than gravitationally
+lensed geometry.
+
 ## Animation timeline and video export
 
-The **Timeline** window animates body positions and the camera pose independently.
+The **Timeline** window animates body positions, body rotations, and the camera pose independently.
 Animation projects currently live only in memory: closing the app loses the timeline.
 
 1. Select a body in the view or its timeline row (or select **Camera**).
 2. Choose a frame using the ruler, frame field, or navigation buttons.
-3. Move the object with its existing gizmo/XYZ fields, or navigate the camera.
+3. Move or rotate the object with the Inspector fields/gizmos, or navigate the camera.
 4. Press **Add [object] keyframe**. At an existing key, **Update [object] keyframe** replaces that pose.
 5. Repeat at another frame. Drag a diamond to retime it, or select it and press
    **Remove** / Delete. Keys cannot overlap within a track.
@@ -47,7 +71,7 @@ clear the selected body and hide its transform gizmo. Deselecting preserves keys
 and uncaptured poses. Select a track again before adding/removing keys; use the
 ruler to scrub without changing the track selection.
 
-Position interpolation is linear; camera orientation follows the shortest rotation.
+Position interpolation is linear; body and camera orientations follow the shortest rotation.
 Outside a track's keys, the nearest key is held. A track with no keys stays at its
 base pose. The first key does not create an implicit key at frame zero.
 Edits to animated tracks show **Pose not captured** until captured. Seeking, playing,

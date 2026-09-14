@@ -160,8 +160,9 @@ SurfaceHit makeHit(int sphere, vec3 p, vec3 v, real t)
 
     if (materialKind(sphereMaterial(sphere)) == 6)
         hit.normal = safeUnit(hit.normal);
-    hit.u = real(1) - (atan(hit.normal.z, hit.normal.x) + PI) / (real(2) * PI);
-    hit.v = (asin(clamp(hit.normal.y, real(-1), real(1))) + PI / real(2)) / PI;
+    vec3 localNormal = worldToBody(sphere, hit.normal);
+    hit.u = real(1) - (atan(localNormal.z, localNormal.x) + PI) / (real(2) * PI);
+    hit.v = (asin(clamp(localNormal.y, real(-1), real(1))) + PI / real(2)) / PI;
 
     return hit;
 }

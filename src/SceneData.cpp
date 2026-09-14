@@ -27,6 +27,66 @@ namespace rt
         return n > 1e-20 ? a / n : Vec3(0);
     }
 
+    Quaternion normalizedRotation(Quaternion q)
+    {
+        const double norm = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+
+        if (!std::isfinite(norm) || norm < 1e-15)
+            throw std::runtime_error("Invalid body rotation");
+
+        return {q.x / norm, q.y / norm, q.z / norm, q.w / norm};
+    }
+
+    Quaternion composeRotation(Quaternion a, Quaternion b)
+    {
+        return normalizedRotation(
+            {a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+             a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z});
+    }
+
+    Vec3 rotateVector(Quaternion q, Vec3 v)
+    {
+        const Vec3 u{q.x, q.y, q.z};
+        return v + 2 * cross(u, cross(u, v) + q.w * v);
+    }
+
+    Quaternion rotationFromDegrees(Vec3 angles)
+    {
+        const double halfRadians = 3.141592653589793 / 360;
+        const double x = std::remainder(angles.x, 360.0) * halfRadians;
+        const double y = std::remainder(angles.y, 360.0) * halfRadians;
+        const double z = std::remainder(angles.z, 360.0) * halfRadians;
+        return composeRotation(
+            {0, 0, std::sin(z), std::cos(z)},
+            composeRotation({0, std::sin(y), 0, std::cos(y)}, {std::sin(x), 0, 0, std::cos(x)}));
+    }
+
+    Vec3 rotationDegrees(Quaternion q)
+    {
+        q = normalizedRotation(q);
+        const double sine = std::clamp(2 * (q.w * q.y - q.z * q.x), -1.0, 1.0);
+        const double y = std::asin(sine);
+        const double x = std::abs(sine) > 1 - 1e-12
+                             ? std::atan2(2 * (q.w * q.x - q.y * q.z), 1 - 2 * (q.x * q.x + q.z * q.z))
+                             : std::atan2(2 * (q.w * q.x + q.y * q.z), 1 - 2 * (q.x * q.x + q.y * q.y));
+        const double z = std::abs(sine) > 1 - 1e-12
+                             ? 0
+                             : std::atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
+        return (180 / 3.141592653589793) * Vec3{x, y, z};
+    }
+
+    Quaternion bodyRotation(const SphereData &sphere)
+    {
+        const auto q = sphere.orientation;
+        return normalizedRotation({q.x, q.y, q.z, q.w});
+    }
+
+    void setBodyRotation(SphereData &sphere, Quaternion rotation)
+    {
+        const auto q = normalizedRotation(rotation);
+        sphere.orientation = {float(q.x), float(q.y), float(q.z), float(q.w)};
+    }
+
     void CameraData::validate() const
     {
         if (!std::isfinite(dot(position, position)) || !std::isfinite(dot(lookAt, lookAt)) ||
@@ -138,8 +198,13 @@ namespace rt
 
         int fields = 0;
 
-        for (auto [centerRadius, material] : spheres)
+        for (auto [centerRadius, material, orientation] : spheres)
         {
+            const double norm2 = orientation.x * orientation.x + orientation.y * orientation.y +
+                                 orientation.z * orientation.z + orientation.w * orientation.w;
+            if (!finite(orientation) || std::abs(norm2 - 1) > 1e-4)
+                throw std::runtime_error("Body orientation must be a unit quaternion");
+
             if (!finite(centerRadius) || centerRadius.w <= 0 || material.x < 0 ||
                 material.x >= static_cast<int>(materials.size()))
                 throw std::runtime_error("Invalid sphere");
@@ -238,7 +303,7 @@ namespace rt
         result.observerVelocity = velocity.x * right + velocity.y * up + velocity.z * forward;
         bool interior = false;
 
-        for (const auto [centerRadius, material] : scene.spheres)
+        for (const auto [centerRadius, material, orientation] : scene.spheres)
         {
             if (scene.materials[material.x].kindTexture.x != Schwarzschild)
                 continue;

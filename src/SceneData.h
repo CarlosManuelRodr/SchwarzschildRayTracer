@@ -89,6 +89,27 @@ namespace rt
      */
     Vec3 normalized(const Vec3 &a);
 
+    /** @brief Unit local-to-world rotation quaternion in (x,y,z,w) order. */
+    struct Quaternion
+    {
+        double x = 0, y = 0, z = 0, w = 1;
+    };
+
+    /** @brief Normalize a finite, nonzero quaternion; throw for invalid input. */
+    Quaternion normalizedRotation(Quaternion q);
+
+    /** @brief Compose rotations: b is applied first, then a. */
+    Quaternion composeRotation(Quaternion a, Quaternion b);
+
+    /** @brief Rotate a vector from local to world coordinates with a unit quaternion. */
+    Vec3 rotateVector(Quaternion q, Vec3 v);
+
+    /** @brief Convert degrees about fixed X, Y, Z axes into Rz * Ry * Rx. */
+    Quaternion rotationFromDegrees(Vec3 angles);
+
+    /** @brief Return an equivalent XYZ Euler representation in degrees; gimbal lock sets Z to zero. */
+    Vec3 rotationDegrees(Quaternion q);
+
     /**
      * @brief Four floating-point lanes matching a GLSL vec4 in std430 storage.
      *
@@ -144,7 +165,14 @@ namespace rt
     {
         Float4 centerRadius;
         Int4 material;
+        Float4 orientation{0, 0, 0, 1}; ///< Unit local-to-world quaternion; preserves sphere shape.
     };
+
+    /** @brief Read and normalize a body's stored local-to-world orientation. */
+    Quaternion bodyRotation(const SphereData &sphere);
+
+    /** @brief Store a normalized body orientation in the GPU-compatible float record. */
+    void setBodyRotation(SphereData &sphere, Quaternion rotation);
 
     /**
      * @brief GPU material record with indexed textures rather than owning pointers.
@@ -178,7 +206,8 @@ namespace rt
     /**
      * @brief Thin emitting annulus centered on the Schwarzschild sphere.
      *
-     * Radii use horizon units, peakTemperature is in kelvin, and normal defines its plane.
+     * Radii use horizon units and peakTemperature is in kelvin. The normal is expressed
+     * in black-hole-local coordinates; the sphere orientation rotates the disk into the world.
      * The temperature profile and circular motion are shading models, not a fluid solver.
      */
     struct AccretionDisk
@@ -230,7 +259,7 @@ namespace rt
             AdaptiveCutoff
         };
 
-        IntegrationMode integrationMode = FixedRadius;
+        IntegrationMode integrationMode = FullScene;
         int width = 1440;
         int height = 900;
         int samples = 30;       ///< Target completed samples per pixel.

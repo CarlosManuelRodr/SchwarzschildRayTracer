@@ -9,19 +9,9 @@
 namespace rt
 {
     /**
-     * @brief Rotation quaternion stored as (x,y,z,w), with identity (0,0,0,1).
-     *
-     * Pose operations normalize it; it maps local camera axes into world axes.
-     */
-    struct Quaternion
-    {
-        double x = 0, y = 0, z = 0, w = 1;
-    };
-
-    /**
      * @brief World position in horizon units and a camera orientation.
      *
-     * Local camera forward is -Z and up is +Y; bodies currently use position only.
+     * Local camera forward is -Z and up is +Y; body orientations rotate their surface frames.
      */
     struct Pose
     {

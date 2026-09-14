@@ -107,7 +107,7 @@ namespace rt
             std::array<std::uint32_t, 4> random{};
         };
 
-        static_assert(sizeof(StoredState) == 112 && sizeof(SphereData) == 32 && sizeof(MaterialData) == 48 &&
+        static_assert(sizeof(StoredState) == 112 && sizeof(SphereData) == 48 && sizeof(MaterialData) == 48 &&
                           sizeof(TextureData) == 48,
                       "GPU storage layout mismatch");
     } // namespace
@@ -317,15 +317,23 @@ namespace rt
         if (scene.spheres.size() != g.observerGeometry.spheres.size())
             throw std::runtime_error("Geometry edits must preserve body indices");
 
-        for (const auto sphere : scene.spheres)
+        for (const auto &sphere : scene.spheres)
+        {
             if (!std::isfinite(sphere.centerRadius.x) || !std::isfinite(sphere.centerRadius.y) ||
                 !std::isfinite(sphere.centerRadius.z))
                 throw std::runtime_error("Body position must be finite");
+
+            const auto q = sphere.orientation;
+            const double norm2 =
+                double(q.x) * q.x + double(q.y) * q.y + double(q.z) * q.z + double(q.w) * q.w;
+            if (!std::isfinite(norm2) || std::abs(norm2 - 1) > 1e-4)
+                throw std::runtime_error("Body orientation must be a unit quaternion");
+        }
         g.wait();
         poll();
         g.buffer(0, scene.spheres.data(), scene.spheres.size() * sizeof(SphereData));
         g.observerGeometry.spheres = scene.spheres;
-        checkGl("Update body positions");
+        checkGl("Update body transforms");
     }
 
     int GpuRenderer::pickDisplayed(double u, double v) const

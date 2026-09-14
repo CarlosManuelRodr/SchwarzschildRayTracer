@@ -222,6 +222,29 @@ namespace rt
 
     int runAnimationTests()
     {
+        auto rotatingScene = fixture();
+        CameraData rotatingCamera;
+        AnimationEditor rotating(rotatingScene, rotatingCamera);
+        rotating.selectBody(0);
+        rotating.capture();
+        rotating.seek(10);
+        setBodyRotation(rotatingScene.spheres[0], rotationFromDegrees({0, 0, 90}));
+        rotating.observe(rotatingScene, rotatingCamera);
+        rotating.endGesture();
+        rotating.capture();
+        rotating.clip.apply(5, rotatingScene, rotatingCamera);
+        auto direction = rotateVector(bodyRotation(rotatingScene.spheres[0]), {1, 0, 0});
+        require(std::abs(direction.x - std::sqrt(0.5)) < 1e-7 &&
+                    std::abs(direction.y - std::sqrt(0.5)) < 1e-7,
+                "Body keyframes must interpolate rotation using the shortest quaternion arc");
+        rotating.undo();
+        require(rotating.clip.tracks[1].keys.size() == 1 && rotating.hasDrafts(),
+                "Undoing a rotation key must restore its editable draft");
+        rotating.redo();
+        rotating.clip.apply(10, rotatingScene, rotatingCamera);
+        direction = rotateVector(bodyRotation(rotatingScene.spheres[0]), {1, 0, 0});
+        require(std::abs(direction.y - 1) < 1e-7, "Redo must restore body orientation for playback/export");
+
         ViewportRect area{100, 50, 800, 600};
         auto wide = area.fit(2.0);
         require(wide.x == 100 && wide.y == 150 && wide.width == 800 && wide.height == 400,

@@ -152,6 +152,7 @@ namespace rt
                 c.x = static_cast<float>(p.position.x);
                 c.y = static_cast<float>(p.position.y);
                 c.z = static_cast<float>(p.position.z);
+                setBodyRotation(scene.spheres.at(t.body), p.orientation);
             }
         }
     }
@@ -174,7 +175,7 @@ namespace rt
                                      : kind == DiffuseLight  ? "Sun"
                                                              : "Body";
             clip.tracks.push_back(
-                {i, name, {{s.centerRadius.x, s.centerRadius.y, s.centerRadius.z}, {}}, {}, {}});
+                {i, name, {{s.centerRadius.x, s.centerRadius.y, s.centerRadius.z}, bodyRotation(s)}, {}, {}});
         }
     }
 
@@ -217,6 +218,7 @@ namespace rt
             {
                 auto c = scene.spheres.at(t.body).centerRadius;
                 current.position = {c.x, c.y, c.z};
+                current.orientation = bodyRotation(scene.spheres.at(t.body));
             }
 
             Pose expected = t.draft ? *t.draft : t.evaluate(frame);
@@ -226,6 +228,13 @@ namespace rt
                 expected.position = {static_cast<float>(expected.position.x),
                                      static_cast<float>(expected.position.y),
                                      static_cast<float>(expected.position.z)};
+            if (t.body >= 0)
+            {
+                SphereData stored;
+                setBodyRotation(stored, expected.orientation);
+                expected.orientation = bodyRotation(stored);
+            }
+
             if (samePose(current, expected))
                 continue;
 

@@ -59,6 +59,56 @@ namespace rt
         bodyEditPending = false;
     }
 
+    void SettingsPanel::drawToolSelector()
+    {
+        ImGui::SeparatorText("Interaction tool");
+        const char* names[] = {"Pointer", "Hand", "Rotate"};
+        const char* tips[] = {"Select bodies and use translation handles. Drag empty space to look around.",
+                              "Left-drag any body to move it in the view plane.",
+                              "Select a body, then drag an X, Y, or Z rotation ring."};
+
+        for (int i = 0; i < 3; ++i)
+        {
+            if (i > 0)
+                ImGui::SameLine();
+
+            if (ImGui::RadioButton(names[i], int(activeTool) == i))
+            {
+                activeTool = InteractionTool(i);
+                dragAxis = -1;
+                bodyEditPending = false;
+                gizmoVisible = false;
+            }
+
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s Right-drag looks around in every tool.", tips[i]);
+        }
+    }
+
+    void SettingsPanel::beginHandDrag(int body, SDL_FPoint point, const SceneData &scene,
+                                      const CameraData &camera)
+    {
+        if (!editingEnabled || body < 0 || body >= int(scene.spheres.size()) || imageRect.height <= 0)
+            return;
+
+        if (selectedBody != body)
+            selectBody(body);
+
+        const auto &sphere = scene.spheres[body];
+        dragBodyPosition = {sphere.centerRadius.x, sphere.centerRadius.y, sphere.centerRadius.z};
+        dragBodyRotation = bodyRotation(sphere);
+        const auto basis = camera.basis(imageRect.width / imageRect.height);
+        dragRight = normalized(basis[2]);
+        dragUp = normalized(basis[3]);
+        const double depth = std::max(0.01, std::abs(dot(dragBodyPosition - camera.position,
+                                                         normalized(camera.lookAt - camera.position))));
+        dragPixelScale =
+            2 * depth * std::tan(camera.verticalFov * 3.141592653589793 / 360) / imageRect.height;
+        dragStart = point;
+        dragAxis = 3;
+        rotatingBody = false;
+    }
+
     void SettingsPanel::processGizmoEvent(const SDL_Event &event)
     {
         if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST || event.type == SDL_EVENT_WINDOW_MINIMIZED ||
@@ -69,36 +119,86 @@ namespace rt
         }
 
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT && visible &&
-            gizmoVisible && viewportHovered && imageRect.contains(event.button.x, event.button.y))
+            gizmoVisible && viewportHovered && imageRect.contains(event.button.x, event.button.y) &&
+            activeTool != InteractionTool::Hand)
         {
             SDL_FPoint point{event.button.x, event.button.y};
             float nearest = 9 * uiScale;
             int axis = -1;
+            int ringSegment = 0;
 
             for (int i = 0; i < 3; ++i)
             {
-                float distance = distanceToSegment(point, gizmoOrigin, gizmoEnds[i]);
-
-                if (distance < nearest)
+                if (activeTool == InteractionTool::Rotate)
                 {
-                    nearest = distance;
-                    axis = i;
+                    for (int j = 0; j < 64; ++j)
+                    {
+                        const auto a = rotationRings[i][j], b = rotationRings[i][j + 1];
+                        const double dx = b.x - a.x, dy = b.y - a.y;
+                        const double length2 = dx * dx + dy * dy;
+                        const double t =
+                            length2 > 1e-8
+                                ? std::clamp(((point.x - a.x) * dx + (point.y - a.y) * dy) / length2, 0.0,
+                                             1.0)
+                                : 0;
+                        const float distance =
+                            float(std::hypot(point.x - a.x - t * dx, point.y - a.y - t * dy));
+
+                        if (distance < nearest)
+                        {
+                            nearest = distance;
+                            axis = i;
+                            ringSegment = j;
+                        }
+                    }
+                }
+                else
+                {
+                    float distance = distanceToSegment(point, gizmoOrigin, gizmoEnds[i]);
+
+                    if (distance < nearest)
+                    {
+                        nearest = distance;
+                        axis = i;
+                    }
                 }
             }
 
-            if (std::hypot(point.x - gizmoOrigin.x, point.y - gizmoOrigin.y) < 8 * uiScale)
+            if (activeTool == InteractionTool::Pointer &&
+                std::hypot(point.x - gizmoOrigin.x, point.y - gizmoOrigin.y) < 8 * uiScale)
                 axis = 3;
+
             if (axis >= 0)
             {
                 dragAxis = axis;
                 dragStart = point;
                 dragBodyPosition = displayedBodyPosition;
+                dragBodyRotation = displayedBodyRotation;
                 dragLength = gizmoLength;
                 dragPixelScale = gizmoPixelScale;
                 dragRight = gizmoRight;
                 dragUp = gizmoUp;
+                rotatingBody = activeTool == InteractionTool::Rotate;
 
-                if (axis < 3)
+                if (rotatingBody)
+                {
+                    rotationCenter = gizmoOrigin;
+                    rotationU = {rotationRings[axis][0].x - gizmoOrigin.x,
+                                 rotationRings[axis][0].y - gizmoOrigin.y};
+                    rotationV = {rotationRings[axis][16].x - gizmoOrigin.x,
+                                 rotationRings[axis][16].y - gizmoOrigin.y};
+                    const double angle = (ringSegment + 0.5) * 2 * 3.141592653589793 / 64;
+                    rotationTangent = {float(-std::sin(angle) * rotationU.x + std::cos(angle) * rotationV.x),
+                                       float(-std::sin(angle) * rotationU.y + std::cos(angle) * rotationV.y)};
+                    const double det = rotationU.x * rotationV.y - rotationU.y * rotationV.x;
+                    const double x = point.x - rotationCenter.x, y = point.y - rotationCenter.y;
+                    rotationLastAngle = std::abs(det) > 1
+                                            ? std::atan2((rotationU.x * y - rotationU.y * x) / det,
+                                                         (x * rotationV.y - y * rotationV.x) / det)
+                                            : 0;
+                    rotationAngle = 0;
+                }
+                else if (axis < 3)
                     dragScreenAxis = {gizmoEnds[axis].x - gizmoOrigin.x, gizmoEnds[axis].y - gizmoOrigin.y};
             }
         }
@@ -106,24 +206,59 @@ namespace rt
         if (event.type == SDL_EVENT_MOUSE_MOTION && dragAxis >= 0)
         {
             double dx = event.motion.x - dragStart.x, dy = event.motion.y - dragStart.y;
-            Vec3 delta;
+            pendingBodyPosition = dragBodyPosition;
+            pendingBodyRotation = dragBodyRotation;
 
-            if (dragAxis == 3)
-                delta = dragPixelScale * (dx * dragRight - dy * dragUp);
+            if (rotatingBody)
+            {
+                const double det = rotationU.x * rotationV.y - rotationU.y * rotationV.x;
+
+                if (std::abs(det) > 1)
+                {
+                    const double x = event.motion.x - rotationCenter.x, y = event.motion.y - rotationCenter.y;
+                    const double angle = std::atan2((rotationU.x * y - rotationU.y * x) / det,
+                                                    (x * rotationV.y - y * rotationV.x) / det);
+                    rotationAngle += std::remainder(angle - rotationLastAngle, 2 * 3.141592653589793);
+                    rotationLastAngle = angle;
+                }
+                else
+                {
+                    const double length2 =
+                        rotationTangent.x * rotationTangent.x + rotationTangent.y * rotationTangent.y;
+                    rotationAngle =
+                        (dx * rotationTangent.x + dy * rotationTangent.y) / std::max(1.0, length2);
+                }
+
+                Vec3 angles;
+                const double degrees = rotationAngle * 180 / 3.141592653589793;
+                if (dragAxis == 0)
+                    angles.x = degrees;
+                if (dragAxis == 1)
+                    angles.y = degrees;
+                if (dragAxis == 2)
+                    angles.z = degrees;
+                pendingBodyRotation = composeRotation(rotationFromDegrees(angles), dragBodyRotation);
+            }
             else
             {
-                double length2 = dragScreenAxis.x * dragScreenAxis.x + dragScreenAxis.y * dragScreenAxis.y;
-                double amount = dragLength * (dx * dragScreenAxis.x + dy * dragScreenAxis.y) / length2;
-
-                if (dragAxis == 0)
-                    delta.x = amount;
-                if (dragAxis == 1)
-                    delta.y = amount;
-                if (dragAxis == 2)
-                    delta.z = amount;
+                Vec3 delta;
+                if (dragAxis == 3)
+                    delta = dragPixelScale * (dx * dragRight - dy * dragUp);
+                else
+                {
+                    double length2 =
+                        dragScreenAxis.x * dragScreenAxis.x + dragScreenAxis.y * dragScreenAxis.y;
+                    double amount = dragLength * (dx * dragScreenAxis.x + dy * dragScreenAxis.y) / length2;
+                    if (dragAxis == 0)
+                        delta.x = amount;
+                    if (dragAxis == 1)
+                        delta.y = amount;
+                    if (dragAxis == 2)
+                        delta.z = amount;
+                }
+                pendingBodyPosition = dragBodyPosition + delta;
             }
 
-            pendingBodyPosition = dragBodyPosition + delta;
             bodyEditPending = finitePosition(pendingBodyPosition);
         }
 
@@ -135,92 +270,123 @@ namespace rt
                                        const SceneData &scene, double)
     {
         if (originalBodyPositions.empty())
-            for (auto sphere : scene.spheres)
+        {
+            for (const auto &sphere : scene.spheres)
+            {
                 originalBodyPositions.push_back(
                     {sphere.centerRadius.x, sphere.centerRadius.y, sphere.centerRadius.z});
-        gizmoVisible = false;
-
-        if (selectedBody < 0 || selectedBody >= int(scene.spheres.size()))
-        {
-            if (!panels[1])
-                return;
-
-            if (ImGui::Begin("Inspector", nullptr, lockedLayout ? ImGuiWindowFlags_NoMove : 0))
-            {
-                if (cameraSelected)
-                {
-                    ImGui::SeparatorText("Camera position");
-                    double values[] = {camera.position.x, camera.position.y, camera.position.z};
-                    const char* axes[] = {"X", "Y", "Z"};
-
-                    for (int i = 0; i < 3; ++i)
-                    {
-                        ImGui::SetNextItemWidth(-36 * uiScale);
-
-                        if (ImGui::InputDouble(axes[i], &values[i], 0, 0, "%.8g") &&
-                            finitePosition({values[0], values[1], values[2]}))
-                        {
-                            actions.positionChanged = true;
-                            actions.position = {values[0], values[1], values[2]};
-                        }
-                    }
-
-                    if (ImGui::Button("Reset camera pose"))
-                        actions.resetCamera = true;
-                }
-                else
-                    ImGui::TextWrapped("Select an object in the scene or viewport to edit its position.");
+                originalBodyRotations.push_back(bodyRotation(sphere));
             }
-
-            ImGui::End();
-
-            return;
         }
 
-        auto sphere = scene.spheres[selectedBody];
-        displayedBodyPosition = {sphere.centerRadius.x, sphere.centerRadius.y, sphere.centerRadius.z};
+        gizmoVisible = false;
+        const bool hasBody = selectedBody >= 0 && selectedBody < int(scene.spheres.size());
 
-        if (bodyEditPending)
+        if (hasBody)
         {
-            actions.body = selectedBody;
-            actions.bodyPosition = pendingBodyPosition;
-            displayedBodyPosition = pendingBodyPosition;
-            bodyEditPending = false;
+            const auto &sphere = scene.spheres[selectedBody];
+            displayedBodyPosition = {sphere.centerRadius.x, sphere.centerRadius.y, sphere.centerRadius.z};
+            displayedBodyRotation = bodyRotation(sphere);
+
+            if (bodyEditPending)
+            {
+                displayedBodyPosition = pendingBodyPosition;
+                displayedBodyRotation = pendingBodyRotation;
+                actions.body = selectedBody;
+                actions.bodyPosition = displayedBodyPosition;
+                actions.bodyOrientation = displayedBodyRotation;
+                bodyEditPending = false;
+            }
         }
 
-        if (!panels[1])
+        if (!visible || !panels[1])
             return;
 
         if (ImGui::Begin("Inspector", nullptr, lockedLayout ? ImGuiWindowFlags_NoMove : 0))
         {
-            ImGui::SeparatorText(bodyName(scene, selectedBody));
-            double position[] = {displayedBodyPosition.x, displayedBodyPosition.y, displayedBodyPosition.z};
-            const char* axes[] = {"X", "Y", "Z"};
+            drawToolSelector();
 
-            for (int i = 0; i < 3; ++i)
+            if (hasBody || cameraSelected)
             {
-                ImGui::SetNextItemWidth(-36 * uiScale);
+                ImGui::SeparatorText(hasBody ? bodyName(scene, selectedBody) : "Camera position");
+                Vec3 p = hasBody ? displayedBodyPosition : camera.position;
+                double position[] = {p.x, p.y, p.z};
+                const char* axes[] = {"X", "Y", "Z"};
+                bool positionChanged = false;
 
-                if (ImGui::InputDouble(axes[i], &position[i], 0, 0, "%.8g") &&
-                    finitePosition({position[0], position[1], position[2]}))
+                for (int i = 0; i < 3; ++i)
                 {
-                    actions.body = selectedBody;
-                    actions.bodyPosition = {position[0], position[1], position[2]};
+                    ImGui::SetNextItemWidth(-36 * uiScale);
+                    positionChanged |= ImGui::InputDouble(axes[i], &position[i], 0, 0, "%.8g");
+                }
+
+                if (positionChanged && finitePosition({position[0], position[1], position[2]}))
+                {
+                    if (hasBody)
+                    {
+                        displayedBodyPosition = {position[0], position[1], position[2]};
+                        actions.body = selectedBody;
+                    }
+                    else
+                    {
+                        actions.positionChanged = true;
+                        actions.position = {position[0], position[1], position[2]};
+                    }
+                }
+
+                if (ImGui::Button(hasBody ? "Reset position" : "Reset camera pose"))
+                {
+                    if (hasBody)
+                    {
+                        displayedBodyPosition = originalBodyPositions[selectedBody];
+                        actions.body = selectedBody;
+                    }
+                    else
+                        actions.resetCamera = true;
+                }
+
+                if (hasBody)
+                {
+                    ImGui::SeparatorText("Rotation (degrees)");
+                    const Vec3 euler = rotationDegrees(displayedBodyRotation);
+                    double angles[] = {euler.x, euler.y, euler.z};
+                    bool changed = false;
+                    ImGui::PushID("rotation");
+                    for (int i = 0; i < 3; ++i)
+                    {
+                        ImGui::SetNextItemWidth(-36 * uiScale);
+                        changed |= ImGui::InputDouble(axes[i], &angles[i], 0, 0, "%.6f");
+                    }
+                    ImGui::PopID();
+
+                    if (changed && finitePosition({angles[0], angles[1], angles[2]}))
+                    {
+                        displayedBodyRotation = rotationFromDegrees({angles[0], angles[1], angles[2]});
+                        actions.body = selectedBody;
+                    }
+
+                    if (ImGui::Button("Reset rotation"))
+                    {
+                        displayedBodyRotation = originalBodyRotations[selectedBody];
+                        actions.body = selectedBody;
+                    }
+
+                    ImGui::TextDisabled("XYZ angles; rotation gizmo uses world axes.");
+                    if (scene.materials[scene.spheres[selectedBody].material.x].kindTexture.x ==
+                        Schwarzschild)
+                        ImGui::TextWrapped(
+                            "Rotation turns the accretion disk. Schwarzschild gravity is spherical.");
+
+                    if (actions.body == selectedBody)
+                    {
+                        actions.bodyPosition = displayedBodyPosition;
+                        actions.bodyOrientation = displayedBodyRotation;
+                    }
                 }
             }
-
-            if (ImGui::Button("Reset position"))
-            {
-                actions.body = selectedBody;
-                actions.bodyPosition = originalBodyPositions[selectedBody];
-            }
-
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Restore this body's original scene position.");
-            if (scene.materials[scene.spheres[selectedBody].material.x].kindTexture.x == Schwarzschild)
-                ImGui::TextDisabled("Disk and gravity follow this position.");
+            else
+                ImGui::TextWrapped("Select an object in the scene or viewport to edit its transform.");
         }
-
         ImGui::End();
     }
 
@@ -233,6 +399,8 @@ namespace rt
 
         ImVec2 display{imageRect.width, imageRect.height};
         auto selected = scene.spheres[selectedBody].centerRadius;
+        displayedBodyRotation = actions.body == selectedBody ? actions.bodyOrientation
+                                                             : bodyRotation(scene.spheres[selectedBody]);
         displayedBodyPosition =
             actions.body == selectedBody ? actions.bodyPosition : Vec3(selected.x, selected.y, selected.z);
         bool anchored = selectedBody < int(bodyAnchors.size());
@@ -289,6 +457,43 @@ namespace rt
         draw->PushClipRect({imageRect.x, imageRect.y},
                            {imageRect.x + imageRect.width, imageRect.y + imageRect.height}, true);
         ImVec2 start{gizmoOrigin.x, gizmoOrigin.y};
+
+        if (activeTool == InteractionTool::Rotate)
+        {
+            const double radius = 75 * uiScale;
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                const Vec3 u = axes[(axis + 1) % 3], v = axes[(axis + 2) % 3];
+                for (int j = 0; j <= 64; ++j)
+                {
+                    const double angle = j * 2 * 3.141592653589793 / 64;
+                    const Vec3 direction = std::cos(angle) * u + std::sin(angle) * v;
+                    auto &point = rotationRings[axis][j];
+                    point = {float(start.x + radius * dot(direction, gizmoRight)),
+                             float(start.y - radius * dot(direction, gizmoUp))};
+                    if (j > 0)
+                    {
+                        const auto previous = rotationRings[axis][j - 1];
+                        draw->AddLine({previous.x, previous.y}, {point.x, point.y},
+                                      dragAxis == axis ? IM_COL32(255, 220, 90, 255) : colors[axis],
+                                      3 * uiScale);
+                    }
+                }
+                const auto label = rotationRings[axis][8];
+                draw->AddText({label.x + 5, label.y + 5}, colors[axis], labels[axis]);
+            }
+            draw->AddText({start.x + 9, start.y - 20}, IM_COL32_WHITE, bodyName(scene, selectedBody));
+            draw->PopClipRect();
+            gizmoVisible = true;
+            return;
+        }
+
+        if (activeTool == InteractionTool::Hand)
+        {
+            draw->AddCircle(start, 10 * uiScale, IM_COL32(255, 220, 90, 255), 24, 2 * uiScale);
+            draw->PopClipRect();
+            return;
+        }
 
         for (int i = 0; i < 3; ++i)
         {

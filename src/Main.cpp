@@ -109,7 +109,7 @@ namespace
         if (failures || gpu.progress().failures)
             throw std::runtime_error("Benchmark encountered invalid rays");
     }
-}
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -358,8 +358,21 @@ int main(int argc, char** argv)
                 if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED)
                     focused = true;
 
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT &&
+                    panel.tool() != rt::InteractionTool::Pointer && focused && !minimized && !captureMouse &&
+                    panel.viewport().contains(event.button.x, event.button.y))
+                {
+                    const auto uv = panel.viewport().imagePoint(event.button.x, event.button.y);
+                    const int body = renderer.pickDisplayed(uv.x, uv.y);
+                    panel.selectBody(body);
+                    if (panel.tool() == rt::InteractionTool::Hand)
+                        panel.beginHandDrag(body, {event.button.x, event.button.y}, scene, camera);
+                }
+
                 if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
-                    (event.button.button == SDL_BUTTON_LEFT || event.button.button == SDL_BUTTON_RIGHT) &&
+                    ((event.button.button == SDL_BUTTON_LEFT &&
+                      panel.tool() == rt::InteractionTool::Pointer) ||
+                     event.button.button == SDL_BUTTON_RIGHT) &&
                     focused && !minimized && !captureMouse && !dragging &&
                     panel.viewport().contains(event.button.x, event.button.y))
                 {
@@ -574,6 +587,7 @@ int main(int argc, char** argv)
                 center.x = float(actions.bodyPosition.x);
                 center.y = float(actions.bodyPosition.y);
                 center.z = float(actions.bodyPosition.z);
+                rt::setBodyRotation(scene.spheres[actions.body], actions.bodyOrientation);
                 geometryDirty = true;
                 reset = true;
             }

@@ -337,10 +337,12 @@ namespace rt
                          ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings);
             ImGui::PushTextWrapPos(0);
             ImGui::TextUnformatted(
-                "Compose\n  Click a body or Scene row to select.\n  Drag the XYZ arrows or "
-                "center to move it.\n  Click empty space or press Esc to deselect.");
+                "Compose\n  Choose Pointer, Hand, or Rotate in the Inspector.\n  "
+                "Pointer: select and drag translation handles.\n  Hand: drag any body in the view plane.\n  "
+                "Rotate: drag X/Y/Z rings or enter angles in degrees.\n  Escape deselects.");
             ImGui::Separator();
-            ImGui::TextUnformatted("Navigate (viewport focused)\n  Left/right drag: look around\n  WASD / "
+            ImGui::TextUnformatted("Navigate (viewport focused)\n  Right drag: look around (left drag also "
+                                   "works with Pointer)\n  WASD / "
                                    "arrows: move; Q / E: up / "
                                    "down\n  Shift: precision movement; F1: hide / restore interface");
             ImGui::Separator();
@@ -663,6 +665,9 @@ namespace rt
             ImGui::PopItemFlag();
             ImGui::EndDisabled();
         }
+
+        if (!visible)
+            drawBodyEditor(actions, camera, scene, double(active.width) / active.height);
 
         drawViewport(actions, camera, scene, double(active.width) / active.height);
 

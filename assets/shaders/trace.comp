@@ -19,6 +19,7 @@ struct SphereData
 {
     vec4 centerRadius;
     ivec4 material;
+    vec4 orientation;
 };
 
 /**
@@ -178,6 +179,20 @@ vec3 sphereCenter(int i)
     return spheres[i].centerRadius.xyz;
 }
 
+/** @brief Rotate surface vectors using the body's unit local-to-world quaternion. */
+vec3 bodyToWorld(int i, vec3 v)
+{
+    vec4 q = normalize(spheres[i].orientation);
+    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
+/** @brief Inverse rotation for texture coordinates and tangent-space normal maps. */
+vec3 worldToBody(int i, vec3 v)
+{
+    vec4 q = normalize(spheres[i].orientation);
+    return v + 2.0 * cross(-q.xyz, cross(-q.xyz, v) + q.w * v);
+}
+
 real sphereRadius(int i)
 {
     return spheres[i].centerRadius.w;
@@ -230,7 +245,7 @@ bool diskEnabled()
 
 vec3 diskNormal()
 {
-    return diskAxis;
+    return holeIndex >= 0 ? bodyToWorld(holeIndex, diskAxis) : diskAxis;
 }
 
 real diskInner()

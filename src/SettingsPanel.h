@@ -22,11 +22,19 @@ namespace rt
         Escape
     };
 
+    /** @brief Left-mouse behavior in the viewport; right-drag always controls the camera. */
+    enum class InteractionTool
+    {
+        Pointer,
+        Hand,
+        Rotate
+    };
+
     /**
      * @brief Edits requested by widgets during the current frame.
      *
      * The application commits renderChanged from requestedSettings, applies camera
-     * positionChanged/resetCamera, and applies bodyPosition when body is nonnegative.
+     * positionChanged/resetCamera, and applies bodyPosition/bodyOrientation when body is nonnegative.
      * Widgets do not mutate renderer resources directly.
      */
     struct PanelActions
@@ -39,6 +47,7 @@ namespace rt
         Vec3 position;
         int body = -1;
         Vec3 bodyPosition;
+        Quaternion bodyOrientation;
     };
 
     /**
@@ -95,6 +104,15 @@ namespace rt
          * @brief Submit ImGui draw data into the current OpenGL framebuffer.
          */
         void render();
+
+        /** @brief Return the active Inspector interaction tool. */
+        InteractionTool tool() const
+        {
+            return activeTool;
+        }
+
+        /** @brief Select a body and begin a view-plane drag at a logical window point. */
+        void beginHandDrag(int body, SDL_FPoint point, const SceneData &scene, const CameraData &camera);
 
         /**
          * @brief Select a stable sphere index for inspection, or clear selection with -1.
@@ -262,6 +280,8 @@ namespace rt
         }
 
     private:
+        friend int runGpuTests(const std::filesystem::path &);
+        void drawToolSelector();
         void drawBodyEditor(PanelActions &, const CameraData &, const SceneData &, double aspect);
         void drawGizmo(const PanelActions &, const CameraData &, const SceneData &, double aspect);
         void drawWorkspace(PanelActions &);
@@ -274,11 +294,18 @@ namespace rt
         int selectedBody = -1;
         bool cameraSelected = false;
         std::uint64_t bodySelectionRevision = 0;
+        InteractionTool activeTool = InteractionTool::Pointer;
         int dragAxis = -1; // XYZ or 3 for translation in the view plane.
         bool editorOpen = false, gizmoVisible = false, bodyEditPending = false;
         SDL_FPoint gizmoOrigin{}, dragStart{};
         std::array<SDL_FPoint, 3> gizmoEnds{};
         Vec3 displayedBodyPosition, dragBodyPosition, pendingBodyPosition;
+        Quaternion displayedBodyRotation, dragBodyRotation, pendingBodyRotation;
+        std::array<std::array<SDL_FPoint, 65>, 3> rotationRings{};
+        SDL_FPoint rotationCenter{}, rotationU{}, rotationV{}, rotationTangent{};
+        double rotationLastAngle = 0, rotationAngle = 0;
+        bool rotatingBody = false;
+        std::vector<Quaternion> originalBodyRotations;
         Vec3 gizmoRight, gizmoUp, dragRight, dragUp;
         double gizmoLength = 1, dragLength = 1, gizmoPixelScale = 1, dragPixelScale = 1;
         SDL_FPoint dragScreenAxis{};

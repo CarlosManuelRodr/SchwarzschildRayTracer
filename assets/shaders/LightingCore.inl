@@ -144,12 +144,14 @@ vec3 diskRadiance(vec3 position, vec3 photonDirection, real observerLapse)
 
     // Bounded, stationary emissivity structure illustrates turbulent gas. This
     // is a visual perturbation of the thin-disk flux, not a fluid simulation.
-    vec3 tangent = safeUnit(cross(diskNormal(), vec3(1, 0, 0)));
+    vec3 localNormal = worldToBody(blackHole(), diskNormal());
+    vec3 localRelative = worldToBody(blackHole(), relative);
+    vec3 tangent = safeUnit(cross(localNormal, vec3(1, 0, 0)));
 
     if (dot(tangent, tangent) < real(0.5))
-        tangent = safeUnit(cross(diskNormal(), vec3(0, 0, 1)));
-    vec3 bitangent = cross(diskNormal(), tangent);
-    real angle = atan(dot(relative, bitangent), dot(relative, tangent));
+        tangent = safeUnit(cross(localNormal, vec3(0, 0, 1)));
+    vec3 bitangent = cross(localNormal, tangent);
+    real angle = atan(dot(localRelative, bitangent), dot(localRelative, tangent));
     real shear = real(8) * log(radius / diskInner());
     vec3 coordinates = vec3(real(18) * radius, real(4) * cos(angle + shear), real(4) * sin(angle + shear));
     real structure = real(0.65) * emissionNoise(coordinates) +
@@ -308,10 +310,12 @@ vec3 illuminateEarth(INOUT(TraceState) state, SurfaceHit hit, vec3 albedo)
     if (earth && layer >= 0)
     {
         vec3 mapped = real(2) * textureValue(layer, hit.u, hit.v, hit.p) - vec3(1);
-        vec3 tangent = safeUnit(vec3(normal.z, 0, -normal.x));
+        vec3 localNormal = worldToBody(hit.sphere, normal);
+        vec3 tangent = safeUnit(vec3(localNormal.z, 0, -localNormal.x));
 
         if (dot(tangent, tangent) < real(0.5))
             tangent = vec3(0, 0, -1);
+        tangent = bodyToWorld(hit.sphere, tangent);
         vec3 bitangent = cross(normal, tangent);
         vec3 perturbed = safeUnit(mapped.x * tangent + mapped.y * bitangent + mapped.z * normal);
         normal = safeUnit((real(1) - cloud) * perturbed + cloud * normal);

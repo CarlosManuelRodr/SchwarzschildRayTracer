@@ -51,6 +51,15 @@ namespace rt
             return s;
         }
 
+        SceneData rotationScene()
+        {
+            auto scene = surfaceScene(DiffuseLight);
+            scene.textures[0].kindChildren.x = Image;
+            scene.textures[0].image = {0, 4, 1, 0};
+            scene.texels = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {1, 1, 1, 0}};
+            return scene;
+        }
+
         void waitFor(GpuRenderer &gpu)
         {
             auto start = std::chrono::steady_clock::now();
@@ -88,6 +97,29 @@ namespace rt
     int runCpuTests()
     {
         runCoreTests();
+
+        for (Vec3 angles : {Vec3{25, 35, 70}, Vec3{-45, 90, 30}, Vec3{45, -90, -60}, Vec3{359, 175, -210}})
+        {
+            const auto q = rotationFromDegrees(angles);
+            const auto roundTrip = rotationFromDegrees(rotationDegrees(q));
+            for (Vec3 axis : {Vec3{1, 0, 0}, Vec3{0, 1, 0}, Vec3{0, 0, 1}})
+                require(distance(rotateVector(q, axis), rotateVector(roundTrip, axis)) < 1e-7,
+                        "Euler conversion must preserve orientation, including gimbal lock");
+        }
+        require(distance(rotateVector(rotationFromDegrees({0, 0, 90}), {1, 0, 0}), {0, 1, 0}) < 1e-12,
+                "Positive Z rotation must turn X toward Y");
+        auto textured = rotationScene();
+        RenderSettings rotationSettings;
+        rotationSettings.useObserverFrame = false;
+        rotationSettings.redshift = false;
+        const auto beforeRotation = traceCpu(textured, rotationSettings, {0, 0, 4}, {0, 0, -1});
+        setBodyRotation(textured.spheres[0], rotationFromDegrees({0, 90, 0}));
+        textured.validate();
+        const auto afterRotation = traceCpu(textured, rotationSettings, {0, 0, 4}, {0, 0, -1});
+        require(distance(beforeRotation.color, {0, 1, 0}) < 1e-8 &&
+                    distance(afterRotation.color, {1, 0, 0}) < 1e-8 &&
+                    distance(beforeRotation.position, afterRotation.position) < 1e-12,
+                "Body rotation must change texture lookup without changing the sphere intersection");
 
         CameraData navigation;
         navigation.position = {0, 0, 0};
@@ -337,6 +369,28 @@ namespace rt
         settings.useObserverFrame = false;
         settings.integrationMode = RenderSettings::FullScene;
         std::cout << "Testing GPU: " << gpu.device() << std::endl;
+        auto rotatedTexture = rotationScene();
+        setBodyRotation(rotatedTexture.spheres[0], rotationFromDegrees({0, 90, 0}));
+        auto textureSettings = settings;
+        textureSettings.redshift = false;
+        const auto rotatedRay =
+            gpu.traceRays(rotatedTexture, textureSettings, {{Vec3{0, 0, 4}, Vec3{0, 0, -1}}});
+        require(distance(rotatedRay[0].color, {1, 0, 0}) < 1e-6,
+                "GPU must apply the same inverse body rotation to texture lookup as the CPU");
+
+        CameraData rotationCamera;
+        rotationCamera.position = {0, 0, 4};
+        rotationCamera.lookAt = {0, 0, 0};
+        textureSettings.width = 16;
+        textureSettings.height = 12;
+        textureSettings.samples = 1;
+        setBodyRotation(rotatedTexture.spheres[0], rotationFromDegrees({20, 35, 10}));
+        gpu.updateGeometry(rotatedTexture);
+        gpu.reset(textureSettings, rotationCamera);
+        waitFor(gpu);
+        require(imageRmse(gpu.readback(), renderCpu(rotatedTexture, textureSettings, rotationCamera)) < 1e-5,
+                "Geometry-only rotation updates must reach the GPU and preserve CPU/GPU agreement");
+
         auto fit = gpu.fitResolution(16000, 9000);
         require(fit[0] > 0 && fit[1] > 0 && fit[0] <= 8192 && fit[1] <= 8192 &&
                     std::abs(double(fit[0]) / fit[1] - 16.0 / 9.0) < 0.01,
@@ -887,6 +941,60 @@ namespace rt
             press.type = SDL_EVENT_MOUSE_BUTTON_UP;
             panel.processEvent(press);
             require(!panel.manipulatingBody(), "Releasing the handle must restore navigation");
+            panel.activeTool = InteractionTool::Hand;
+            panel.beginHandDrag(0, {handleX, handleY}, editedScene, editCamera);
+            panel.visible = false;
+            panel.processEvent(move);
+            panel.beginFrame();
+            actions = panel.draw(slowStep, gpu.progress(), editSettings, false, editCamera, editedScene);
+            panel.render();
+            require(actions.body == 0 &&
+                        distance(actions.bodyPosition, {editedScene.spheres[0].centerRadius.x,
+                                                        editedScene.spheres[0].centerRadius.y,
+                                                        editedScene.spheres[0].centerRadius.z}) > 0,
+                    "Hand dragging must work without an axis handle, including while the UI is hidden");
+            panel.visible = true;
+            panel.processEvent(press);
+            panel.activeTool = InteractionTool::Rotate;
+            panel.beginFrame();
+            panel.draw(slowStep, gpu.progress(), editSettings, false, editCamera, editedScene);
+            panel.render();
+            const auto ringStart = panel.rotationRings[2][8];
+            const auto ringEnd = panel.rotationRings[2][16];
+            panel.viewportHovered = true;
+            press.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+            press.button.button = SDL_BUTTON_RIGHT;
+            press.button.x = ringStart.x;
+            press.button.y = ringStart.y;
+            panel.processGizmoEvent(press);
+            require(!panel.manipulatingBody(), "Right mouse must never start an object rotation");
+            press.button.button = SDL_BUTTON_LEFT;
+            panel.processGizmoEvent(press);
+            require(panel.manipulatingBody() && panel.rotatingBody, "Rotation ring must capture left drag");
+            move.motion.x = ringEnd.x;
+            move.motion.y = ringEnd.y;
+            panel.processGizmoEvent(move);
+            panel.beginFrame();
+            actions = panel.draw(slowStep, gpu.progress(), editSettings, false, editCamera, editedScene);
+            panel.render();
+            require(actions.body == 0 &&
+                        distance(rotateVector(actions.bodyOrientation, {1, 0, 0}),
+                                 rotateVector(bodyRotation(editedScene.spheres[0]), {1, 0, 0})) > 0.1,
+                    "Dragging a ring must rotate the selected body");
+            require(distance(actions.bodyPosition,
+                             {editedScene.spheres[0].centerRadius.x, editedScene.spheres[0].centerRadius.y,
+                              editedScene.spheres[0].centerRadius.z}) < 1e-12,
+                    "Rotation rings must preserve the body's center");
+            const auto expectedRotation =
+                composeRotation(rotationFromDegrees({0, 0, 45}), bodyRotation(editedScene.spheres[0]));
+            require(distance(rotateVector(actions.bodyOrientation, {1, 0, 0}),
+                             rotateVector(expectedRotation, {1, 0, 0})) < 1e-5,
+                    "A quarter of a quarter-ring drag must produce a positive 45-degree world rotation");
+            press.type = SDL_EVENT_MOUSE_BUTTON_UP;
+            panel.processGizmoEvent(press);
+            require(!panel.manipulatingBody(), "Releasing a rotation ring must release capture");
+            panel.activeTool = InteractionTool::Pointer;
+
             Timeline timeline(editedScene, editCamera);
             auto timelineFrame = [&]
             {
