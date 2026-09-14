@@ -103,13 +103,13 @@ namespace
                     cpu, settings.exposure);
         std::cout << "CPU reference (double precision, all cores): " << cpuSeconds
                   << " s\nCompletion speedup: " << cpuSeconds / gpuSeconds
-                  << "x\nLinear RGB RMSE: " << std::sqrt(squared / (3 * image.size()))
+                  << "x\nLinear RGB RMSE: " << std::sqrt(squared / static_cast<double>(3 * image.size()))
                   << "\nCPU invalid rays: " << failures << std::endl;
 
         if (failures || gpu.progress().failures)
             throw std::runtime_error("Benchmark encountered invalid rays");
     }
-} // namespace
+}
 
 int main(int argc, char** argv)
 {
