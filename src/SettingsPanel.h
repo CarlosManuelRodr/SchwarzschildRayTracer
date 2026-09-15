@@ -61,8 +61,10 @@ namespace rt
     public:
         /**
          * @brief Initialize the UI and draft settings for a borrowed application window.
+         * @param assets Asset root containing the tool icon PNG files in ui/.
          */
-        SettingsPanel(SDL_Window* window, const RenderSettings &settings);
+        SettingsPanel(SDL_Window* window, const RenderSettings &settings,
+                      const std::filesystem::path &assets);
 
         /**
          * @brief Save workspace preferences and shut down ImGui backends.
@@ -281,6 +283,9 @@ namespace rt
 
     private:
         friend int runGpuTests(const std::filesystem::path &);
+        struct ToolIcons;
+        std::unique_ptr<ToolIcons> toolIcons;
+        unsigned int toolTexture(int index) const;
         void drawToolSelector();
         void drawBodyEditor(PanelActions &, const CameraData &, const SceneData &, double aspect);
         void drawGizmo(const PanelActions &, const CameraData &, const SceneData &, double aspect);

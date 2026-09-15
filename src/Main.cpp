@@ -264,7 +264,7 @@ int main(int argc, char** argv)
         settings.width = initialSize[0];
         settings.height = initialSize[1];
         renderer.reset(settings, camera);
-        rt::SettingsPanel panel(window.get(), settings);
+        rt::SettingsPanel panel(window.get(), settings, assets);
         rt::Timeline timeline(scene, camera);
         std::cout << "GPU: " << renderer.device()
                   << "\nLeft/right-drag to look; arrows/WASD move; Q/E rise/descend; P saves; F1 toggles "

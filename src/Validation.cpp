@@ -166,7 +166,8 @@ namespace rt
         require(observerSettings(velocityScene, settings, velocityCamera).useObserverFrame,
                 "Interior hovering must reach observer validation, not the legacy camera path");
         settings.useObserverFrame = false;
-        require(settings.integrationMode == RenderSettings::FixedRadius, "Fixed radius must be the default");
+        require(settings.integrationMode == RenderSettings::FullScene,
+                "Full-scene integration must be the default");
         settings.integrationMode = RenderSettings::FullScene;
         CameraData pickCamera;
         pickCamera.position = {0, 0, 3};
@@ -892,7 +893,7 @@ namespace rt
         auto window = SDL_GL_GetCurrentWindow();
         checkSdl(SDL_SetWindowSize(window, 1200, 800), "Size editor test window");
         {
-            SettingsPanel panel(window, editSettings);
+            SettingsPanel panel(window, editSettings, assets);
             panel.selectBody(0);
             panel.setDisplayImage(gpu.displayImage());
             double slowStep = 0.0005;

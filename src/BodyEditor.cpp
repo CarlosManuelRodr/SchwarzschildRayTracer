@@ -72,7 +72,15 @@ namespace rt
             if (i > 0)
                 ImGui::SameLine();
 
-            if (ImGui::RadioButton(names[i], int(activeTool) == i))
+            const bool selected = int(activeTool) == i;
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(selected ? ImGuiCol_ButtonActive
+                                                                                     : ImGuiCol_Button));
+            const bool clicked = ImGui::ImageButton(names[i], ImTextureRef(ImTextureID(toolTexture(i))),
+                                                    {24 * uiScale, 24 * uiScale}, {0, 0}, {1, 1},
+                                                    {0, 0, 0, 0}, ImGui::GetStyleColorVec4(ImGuiCol_Text));
+            ImGui::PopStyleColor();
+
+            if (clicked)
             {
                 activeTool = InteractionTool(i);
                 dragAxis = -1;
@@ -81,7 +89,7 @@ namespace rt
             }
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s Right-drag looks around in every tool.", tips[i]);
+                ImGui::SetTooltip("%s: %s Right-drag looks around in every tool.", names[i], tips[i]);
         }
     }
 

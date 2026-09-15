@@ -9,6 +9,8 @@
 #include <fstream>
 #include <cstdio>
 #include <stdexcept>
+#include <limits>
+#include "stb_image.h"
 
 namespace rt
 {
@@ -34,9 +36,73 @@ namespace rt
         }
     } // namespace
 
-    SettingsPanel::SettingsPanel(SDL_Window* owner, const RenderSettings &settings)
-        : draft(settings), window(owner)
+    struct SettingsPanel::ToolIcons
     {
+        std::array<GLuint, 4> textures{};
+        float logoAspect = 1;
+
+        ~ToolIcons()
+        {
+            glDeleteTextures(static_cast<GLsizei>(textures.size()), textures.data());
+        }
+
+        void load(const std::filesystem::path &assets)
+        {
+            const char* names[] = {"cursor.png", "hand.png", "rotate.png", "Logo.png"};
+            GLint previousTexture = 0;
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &previousTexture);
+
+            for (int i = 0; i < static_cast<int>(textures.size()); ++i)
+            {
+                const auto path = assets / "ui" / names[i];
+                std::ifstream file(path, std::ios::binary | std::ios::ate);
+                const auto length = file ? static_cast<std::streamoff>(file.tellg()) : -1;
+                if (length <= 0 || length > std::numeric_limits<int>::max())
+                    throw std::runtime_error("Cannot read UI image: " + path.u8string());
+
+                std::vector<unsigned char> encoded(static_cast<std::size_t>(length));
+                file.seekg(0);
+                if (!file.read(reinterpret_cast<char*>(encoded.data()), length))
+                    throw std::runtime_error("Cannot read UI image: " + path.u8string());
+
+                int width = 0, height = 0, channels = 0;
+                const std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> pixels(
+                    stbi_load_from_memory(encoded.data(), static_cast<int>(length), &width, &height,
+                                          &channels, 4),
+                    stbi_image_free);
+                if (!pixels)
+                    throw std::runtime_error("Cannot decode UI image: " + path.u8string());
+
+                if (i == 3)
+                    logoAspect = static_cast<float>(width) / height;
+
+                glGenTextures(1, &textures[i]);
+                glBindTexture(GL_TEXTURE_2D, textures[i]);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                             pixels.get());
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                glBindTexture(GL_TEXTURE_2D, previousTexture);
+
+                if (glGetError() != GL_NO_ERROR)
+                    throw std::runtime_error("Cannot upload UI image: " + path.u8string());
+            }
+        }
+    };
+
+    unsigned int SettingsPanel::toolTexture(int index) const
+    {
+        return toolIcons->textures[index];
+    }
+
+    SettingsPanel::SettingsPanel(SDL_Window* owner, const RenderSettings &settings,
+                                 const std::filesystem::path &assets)
+        : toolIcons(std::make_unique<ToolIcons>()), draft(settings), window(owner)
+    {
+        toolIcons->load(assets);
+
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         auto &io = ImGui::GetIO();
@@ -366,6 +432,11 @@ namespace rt
         {
             ImGui::SetNextWindowSize({340 * uiScale, 300 * uiScale}, ImGuiCond_Appearing);
             ImGui::Begin("About", &aboutOpen, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings);
+            const float logoWidth = std::max(1.f, std::min(128 * uiScale, ImGui::GetContentRegionAvail().x));
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (ImGui::GetContentRegionAvail().x - logoWidth) / 2);
+            ImGui::Image(ImTextureRef(ImTextureID(toolIcons->textures[3])),
+                         {logoWidth, logoWidth / toolIcons->logoAspect});
+            ImGui::Spacing();
             ImGui::TextUnformatted("Schwarzschild Ray Tracer");
             ImGui::TextWrapped(
                 "An interactive black-hole scene and keyframe animation editor. See README for "
