@@ -250,6 +250,12 @@ int main(int argc, char** argv)
         rt::CameraData camera;
         const rt::CameraData initialCamera = camera;
         rt::SdlGlWindow window(settings.width, settings.height);
+        {
+            const auto iconPath = assets / "ui" / "Logo_small.png";
+            const rt::SdlSurface icon(SDL_LoadPNG(iconPath.u8string().c_str()), SDL_DestroySurface);
+            if (!icon || !SDL_SetWindowIcon(window.get(), icon.get()))
+                std::cerr << "Cannot set window icon: " << SDL_GetError() << '\n';
+        }
 
         if (!SDL_GL_SetSwapInterval(1))
             std::cerr << "VSync unavailable: " << SDL_GetError() << '\n';
