@@ -633,7 +633,9 @@ The bracket converts its direction; \(E/\alpha_e\) restores its scale.
 
 For each pixel sample, the renderer constructs its direction, transforms it into
 initial \(\mathbf V,E,L^2\), then advances the ray. It tests traversed segments
-for surfaces, the disk, and horizon boundaries. Source light or scattered light
+for surfaces and horizon boundaries, and accumulates emission and absorption
+through the finite-height accretion gas. See [the gas-volume model](volumetric-accretion.md)
+for this separate radiative-transfer approximation. Source light or scattered light
 contributes to a linear-light accumulation; display encoding comes afterward.
 “Linear light” means the stored values are proportional to radiance, so averaging
 samples corresponds to averaging light rather than encoded display colors.

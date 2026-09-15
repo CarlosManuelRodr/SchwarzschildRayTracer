@@ -164,6 +164,13 @@ All supplied image resolutions are retained (the Sun file is 4096 x 2048).
 
 The Moon is 0.2727 Earth radii, matching the [physical size ratio](https://science.nasa.gov/moon/by-the-numbers/).
 Its separation is deliberately compressed for the illustrative composition;
+The black hole's accretion flow is a finite-height gas volume, with flared vertical
+structure, sheared 3-D clouds, thermal emission, and self-absorption. It has no
+opaque disk plane: edge-on rays travel through its thickness, and thinner wisps
+transmit background light. Moving or rotating the hole also transforms the gas.
+See [the volumetric accretion model](docs/volumetric-accretion.md) for its equations,
+parameters, and approximations.
+
 Earth and Moon both receive direct sunlight, disk illumination and cast shadows.
 The Sun map's luminance modulates thermal emission with limb darkening; its orange
 false color does not tint the illumination. Lower Exposure to inspect the solar
@@ -309,7 +316,7 @@ Modos de integración (excluyentes; también funcionan con `--render` y `--bench
 La consola y el título muestran el modo activo. Combinar los dos flags produce
 un error explícito. Las vistas previas de navegación conservan el modo elegido.
 En `--adaptative`, se estima la aceleración máxima dentro de un tubo alrededor
-del segmento recto hasta el siguiente objeto, disco o fondo. Se acepta el tramo
+del segmento recto hasta el siguiente objeto o fondo. Se acepta el tramo
 recto si los límites estimados de desplazamiento y cambio de dirección satisfacen
 `absoluteTolerance` y `relativeTolerance` de `RenderSettings` (1e-6 y 1e-4).
 No se omiten tramos que pasan a menos de tres radios de horizonte. Es una
@@ -424,7 +431,8 @@ no forman parte del pipeline compilado.
 
 ## Disco, redshift e iluminación
 
-El disco es una superficie opaca de dos caras, entre 3 y 5.2 radios de horizonte.
+El disco es un volumen de gas con emisión y absorción, entre 3 y 5.2 radios de
+horizonte, con una altura gaussiana de 0.10 radios en el borde exterior.
 Su borde interior coincide con la órbita circular estable más interna de
 Schwarzschild. La temperatura sigue `T⁴ ∝ r⁻³ (1 − √(r_in/r))`, con un máximo
 configurable de 6000 K en la escena inicial. Es el perfil de un
@@ -454,7 +462,8 @@ no contiene máscaras físicas, relieve, nubes volumétricas ni luces nocturnas.
 El fondo estelar es emisivo. Las intensidades, tamaños y separaciones de esta
 escena ilustrativa no representan el Sistema Solar a escala física.
 
-`SceneData::disk` configura radios, temperatura, intensidad y normal;
+`SceneData::disk` configura radios, temperatura, intensidad, normal, altura (`scaleHeight`)
+y extinción (`extinction`);
 `atmosphereHeight` configura el espesor atmosférico. En materiales DiffuseLight,
 `parameters.y/z/w` representan temperatura, escala de radiancia y coeficiente
 de limbo. Una temperatura cero conserva la emisión RGB del material original.
@@ -462,8 +471,8 @@ de limbo. Una temperatura cero conserva la emisión RGB del material original.
 Las conexiones de iluminación y sombra hacia las fuentes son rectas; no se
 resuelven geodésicas entre cada superficie y cada luz. La Tierra usa iluminación
 directa, y la atmósfera dispersión simple solar, sin iluminación volumétrica del
-disco ni múltiples rebotes atmosféricos. El disco carece de espesor, dinámica,
-autoabsorción volumétrica y evolución temporal. No se implementa rotación Kerr.
+disco ni múltiples rebotes atmosféricos. El disco tiene espesor y autoabsorción volumétrica, pero no dinámica de fluidos
+ni evolución temporal. No se implementa rotación Kerr.
 
 ## Pruebas y rendimiento
 

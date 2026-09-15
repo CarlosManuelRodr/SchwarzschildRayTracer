@@ -162,6 +162,7 @@ uniform float relTolerance, absTolerance, maxStep;
 uniform int maxAttempts;
 uniform int holeIndex, planetIndex, thermalOffset, diskOn, useRedshift;
 uniform vec4 diskConfig;
+uniform vec2 diskVolume;
 uniform vec3 diskAxis;
 uniform float airHeight;
 
@@ -261,6 +262,16 @@ real diskOuter()
 real diskPeakTemperature()
 {
     return diskConfig.z;
+}
+
+real diskHeight()
+{
+    return diskVolume.x;
+}
+
+real diskExtinction()
+{
+    return diskVolume.y;
 }
 
 real diskScale()

@@ -204,7 +204,7 @@ namespace rt
     };
 
     /**
-     * @brief Thin emitting annulus centered on the Schwarzschild sphere.
+     * @brief Finite-height emitting gas annulus centered on the Schwarzschild sphere.
      *
      * Radii use horizon units and peakTemperature is in kelvin. The normal is expressed
      * in black-hole-local coordinates; the sphere orientation rotates the disk into the world.
@@ -217,6 +217,10 @@ namespace rt
         float outerRadius = 5.2f;
         float peakTemperature = 6000.0f;
         float emissionScale = 0.35f;
+        /// Vertical Gaussian scale at the outer edge, in horizon radii (truncated at three scales).
+        float scaleHeight = 0.10f;
+        /// Grey extinction per horizon radius at unit gas density.
+        float extinction = 8.0f;
         Vec3 normal{0, 1, 0};
     };
 
@@ -405,4 +409,4 @@ namespace rt
      */
     void saveRgbaPng(const std::filesystem::path &path, int width, int height,
                      const std::vector<unsigned char> &rgba);
-} // namespace rt
+}

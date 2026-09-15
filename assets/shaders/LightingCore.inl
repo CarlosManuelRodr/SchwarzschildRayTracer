@@ -41,24 +41,56 @@ vec3 blackbody(real temperature)
 }
 
 /**
- * @brief Intersect a ray with the planar annulus centered on the hole.
- * minimum/maximum are exclusive ray-parameter bounds; direction need not be unit length.
+ * @brief Clip a unit-direction segment to the gas's bounding cylinder.
+ * Bounds are physical lengths, include origins inside the volume, and contain
+ * the empty inner cavity as well. Density, not this boundary, determines opacity.
  */
-bool diskHit(vec3 origin, vec3 direction, real minimum, real maximum, OUT(real) distance)
+bool diskInterval(vec3 origin, vec3 direction, real maximum, OUT(real) entry, OUT(real) exitDistance)
 {
     if (!diskEnabled() || blackHole() < 0)
         return false;
 
     vec3 relative = origin - sphereCenter(blackHole());
-    real denominator = dot(direction, diskNormal());
+    real height = dot(relative, diskNormal());
+    real vertical = dot(direction, diskNormal());
+    vec3 radial = relative - height * diskNormal();
+    vec3 transverse = direction - vertical * diskNormal();
+    real a = dot(transverse, transverse);
+    real b = dot(radial, transverse);
+    real c = dot(radial, radial) - diskOuter() * diskOuter();
+    entry = real(0);
+    exitDistance = maximum;
 
-    if (abs(denominator) < real(1e-12))
-        return false;
+    if (a < real(1e-12))
+    {
+        if (c > real(0))
+            return false;
+    }
+    else
+    {
+        real discriminant = b * b - a * c;
 
-    distance = -dot(relative, diskNormal()) / denominator;
-    real radius = length(relative + distance * direction);
+        if (discriminant <= real(0))
+            return false;
+        real root = sqrt(discriminant);
+        entry = max(entry, (-b - root) / a);
+        exitDistance = min(exitDistance, (-b + root) / a);
+    }
 
-    return distance > minimum && distance < maximum && radius >= diskInner() && radius <= diskOuter();
+    if (abs(vertical) < real(1e-12))
+    {
+        if (abs(height) >= real(3) * diskHeight())
+            return false;
+    }
+    else
+    {
+        real nearPlane = (-real(3) * diskHeight() - height) / vertical;
+        real farPlane = (real(3) * diskHeight() - height) / vertical;
+        entry = max(entry, min(nearPlane, farPlane));
+        exitDistance = min(exitDistance, max(nearPlane, farPlane));
+    }
+
+    return exitDistance > entry;
 }
 
 /**
@@ -132,35 +164,130 @@ real emissionNoise(vec3 position)
 }
 
 /**
- * @brief Shade disk emission using its temperature, stationary structure, and frequency shift.
- * photonDirection points from emitter toward observer. Evaluating blackbody(g*T) shifts
- * the Planck spectrum and its brightness together; an extra g^4 factor would double-count it.
+ * @brief Express gas positions in a rotating body-local cylindrical basis.
+ * The third component is height; the first two span the equatorial plane.
+ */
+vec3 diskCoordinates(vec3 position)
+{
+    vec3 axis = worldToBody(blackHole(), diskNormal());
+    vec3 relative = worldToBody(blackHole(), position - sphereCenter(blackHole()));
+    vec3 tangent = safeUnit(cross(axis, vec3(1, 0, 0)));
+
+    if (dot(tangent, tangent) < real(0.5))
+        tangent = safeUnit(cross(axis, vec3(0, 0, 1)));
+    return vec3(dot(relative, tangent), dot(relative, cross(axis, tangent)), dot(relative, axis));
+}
+
+/** @brief Smoothly taper a normalized boundary distance from zero to one. */
+real gasFade(real value)
+{
+    real t = clamp(value, real(0), real(1));
+    return t * t * (real(3) - real(2) * t);
+}
+
+/**
+ * @brief Dimensionless gas density with flaring height and sheared 3-D cloud structure.
+ * Noise varies vertically as well as radially and azimuthally. Smooth finite edges
+ * avoid a visible cylinder silhouette. This prescribed gas is not a fluid simulation.
+ */
+real diskDensity(vec3 position)
+{
+    vec3 local = diskCoordinates(position);
+    real radius = sqrt(local.x * local.x + local.y * local.y);
+
+    if (radius <= diskInner() || radius >= diskOuter() || abs(local.z) >= real(3) * diskHeight())
+        return real(0);
+
+    real height = diskHeight() * (real(0.5) + real(0.5) * radius / diskOuter());
+    real angle = atan(local.y, local.x) + real(3) * log(radius / diskInner());
+    vec3 coordinates =
+        vec3(real(3) * radius * cos(angle), real(3) * radius * sin(angle), real(2) * local.z / diskHeight());
+    real cloud = real(0.65) * emissionNoise(coordinates) +
+                 real(0.25) * emissionNoise(real(2.1) * coordinates) +
+                 real(0.1) * emissionNoise(real(4.3) * coordinates);
+    real contrast = max(real(0), real(2.4) * cloud - real(0.45));
+    real radialFade = min(real(0.3), (diskOuter() - diskInner()) * real(0.2));
+
+    return contrast * contrast * exp(-real(0.5) * local.z * local.z / (height * height)) *
+           gasFade((radius - diskInner()) / radialFade) * gasFade((diskOuter() - radius) / radialFade) *
+           gasFade((real(3) * diskHeight() - abs(local.z)) / height);
+}
+
+/**
+ * @brief Thermal source function of the gas, including gravitational and Doppler shifts.
+ * The thin-disk radial temperature law is extended with a cooler vertical envelope.
+ * B_nu(g*T) already includes relativistic brightness; do not apply another g^4.
+ * Circular orbital velocities off the equator are an illustrative kinematic prescription.
  */
 vec3 diskRadiance(vec3 position, vec3 photonDirection, real observerLapse)
 {
-    vec3 relative = position - sphereCenter(blackHole());
-    real radius = length(relative);
+    vec3 local = diskCoordinates(position);
+    real radius = sqrt(local.x * local.x + local.y * local.y);
     real shift = diskFrequencyShift(position, safeUnit(photonDirection), observerLapse);
+    real cooling = real(0.6) + real(0.4) * exp(-local.z * local.z / (diskHeight() * diskHeight()));
 
-    // Bounded, stationary emissivity structure illustrates turbulent gas. This
-    // is a visual perturbation of the thin-disk flux, not a fluid simulation.
-    vec3 localNormal = worldToBody(blackHole(), diskNormal());
-    vec3 localRelative = worldToBody(blackHole(), relative);
-    vec3 tangent = safeUnit(cross(localNormal, vec3(1, 0, 0)));
+    return diskScale() * blackbody(diskTemperature(max(radius, diskInner())) * cooling * shift);
+}
 
-    if (dot(tangent, tangent) < real(0.5))
-        tangent = safeUnit(cross(localNormal, vec3(0, 0, 1)));
-    vec3 bitangent = cross(localNormal, tangent);
-    real angle = atan(dot(localRelative, bitangent), dot(localRelative, tangent));
-    real shear = real(8) * log(radius / diskInner());
-    vec3 coordinates = vec3(real(18) * radius, real(4) * cos(angle + shear), real(4) * sin(angle + shear));
-    real structure = real(0.65) * emissionNoise(coordinates) +
-                     real(0.25) * emissionNoise(real(2.1) * coordinates) +
-                     real(0.1) * emissionNoise(real(4.3) * coordinates);
-    real temperatureVariation = pow(real(0.5) + structure, real(0.25));
+/**
+ * @brief Grey Beer-Lambert attenuation for approximate straight shadow connections.
+ * Twenty-four midpoint samples bound lighting work independently of camera trajectories.
+ */
+real diskTransmission(vec3 origin, vec3 direction, real maximum)
+{
+    real entry, end;
 
-    // B_nu(g*T) = g^3 B_(nu/g)(T); do not multiply by g^4 again.
-    return diskScale() * blackbody(diskTemperature(radius) * temperatureVariation * shift);
+    if (!diskInterval(origin, direction, maximum, entry, end))
+        return real(1);
+    real step = (end - entry) / real(24);
+    real opticalDepth = real(0);
+
+    for (int i = 0; i < 24; ++i)
+        opticalDepth += diskDensity(origin + (entry + (real(i) + real(0.5)) * step) * direction) * step;
+    return exp(-diskExtinction() * opticalDepth);
+}
+
+/**
+ * @brief Integrate emission and absorption on one bounded accepted camera segment.
+ * For each locally homogeneous cell: alpha = 1-exp(-extinction*density*length).
+ * Add throughput*alpha*source before attenuating the light arriving from farther away.
+ * Camera segments inside the cylinder are limited to 0.08 horizon radii by TraceCore.
+ * The optical path uses coordinate length, an illustrative grey-transfer approximation.
+ */
+void transferDisk(INOUT(TraceState) state, vec3 direction, real maximum)
+{
+    real entry, end;
+
+    if (!diskInterval(state.p, direction, maximum, entry, end))
+        return;
+    real step = (end - entry) / real(4);
+
+    for (int i = 0; i < 4; ++i)
+    {
+        vec3 point = state.p + (entry + (real(i) + real(0.5)) * step) * direction;
+        real alpha = real(1) - exp(-diskExtinction() * diskDensity(point) * step);
+        if (alpha <= real(0))
+            continue;
+        state.radiance += state.throughput * alpha * diskRadiance(point, -direction, state.observerLapse);
+        state.throughput = state.throughput * (real(1) - alpha);
+
+        // Treat visibly absorbing gas as part of the hole for selection/anchoring.
+        if (alpha > real(0) && length(state.throughput) < real(0.95) && state.body < 0)
+        {
+            state.body = blackHole();
+#ifdef __cplusplus
+            if (picking)
+            {
+                pickedBody = blackHole();
+                state.status = 1;
+                return;
+            }
+#endif
+        }
+    }
+
+    if (length(state.throughput) < real(1e-5))
+        state.status = 1;
 }
 
 /**
@@ -236,7 +363,7 @@ bool visibleLight(vec3 origin, vec3 direction, real distance, int light)
             return false;
     }
 
-    return !diskHit(origin, direction, EPS, distance - EPS, t);
+    return true;
 }
 
 /**
@@ -369,7 +496,7 @@ vec3 illuminateEarth(INOUT(TraceState) state, SurfaceHit hit, vec3 albedo)
             SurfaceHit source = makeHit(i, origin, light, t);
             real solidAngle = real(2) * PI * (real(1) - cosineMaximum);
             result += surfaceRadiance(source, -light, state.observerLapse) *
-                      atmosphereTransmission(origin, light, t) *
+                      atmosphereTransmission(origin, light, t) * diskTransmission(origin, light, t) *
                       earthBrdf(albedo, normal, view, light, ocean) *
                       (max(dot(normal, light), real(0)) * solidAngle / real(4));
         }
@@ -386,7 +513,9 @@ vec3 illuminateEarth(INOUT(TraceState) state, SurfaceHit hit, vec3 albedo)
             real u = randomValue(state.rng);
             real phi = real(2) * PI * randomValue(state.rng);
             real radius = sqrt(diskInner() * diskInner() + u * area / PI);
-            vec3 point = sphereCenter(blackHole()) + radius * (cos(phi) * tangent + sin(phi) * bitangent);
+            real height = (real(2) * randomValue(state.rng) - real(1)) * real(3) * diskHeight();
+            vec3 point = sphereCenter(blackHole()) + radius * (cos(phi) * tangent + sin(phi) * bitangent) +
+                         height * diskNormal();
             vec3 offset = point - origin;
             real distance = length(offset);
             vec3 light = offset / distance;
@@ -395,10 +524,13 @@ vec3 illuminateEarth(INOUT(TraceState) state, SurfaceHit hit, vec3 albedo)
             if (cosine <= real(0) || !visibleLight(origin, light, distance, -1))
                 continue;
 
-            real geometry = abs(dot(diskNormal(), light)) * cosine / (distance * distance);
+            real geometry = cosine / max(distance * distance, real(1e-8));
+            real emissivity = diskExtinction() * diskDensity(point);
             result += diskRadiance(point, -light, state.observerLapse) *
                       atmosphereTransmission(origin, light, distance) *
-                      earthBrdf(albedo, normal, view, light, ocean) * (area * geometry / real(4));
+                      diskTransmission(origin, light, distance) *
+                      earthBrdf(albedo, normal, view, light, ocean) *
+                      (area * real(6) * diskHeight() * emissivity * geometry / real(4));
         }
     }
 

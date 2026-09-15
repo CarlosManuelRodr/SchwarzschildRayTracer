@@ -38,7 +38,7 @@ namespace
 
     using Clock = std::chrono::steady_clock;
 
-    double seconds(Clock::time_point start)
+    double seconds(const Clock::time_point start)
     {
         return std::chrono::duration<double>(Clock::now() - start).count();
     }
@@ -109,7 +109,7 @@ namespace
         if (failures || gpu.progress().failures)
             throw std::runtime_error("Benchmark encountered invalid rays");
     }
-} // namespace
+}
 
 int main(int argc, char** argv)
 {
@@ -123,10 +123,8 @@ int main(int argc, char** argv)
 
         for (int i = 1; i < argc; ++i)
         {
-            std::string arg = argv[i];
-
-            if (arg == "--test-cpu" || arg == "--test-gpu" || arg == "--benchmark" || arg == "--render" ||
-                arg == "--test-animation" || arg == "--test-export" || arg == "--test-export-gpu")
+            if (std::string arg = argv[i]; arg == "--test-cpu" || arg == "--test-gpu" || arg == "--benchmark" || arg == "--render" ||
+                                           arg == "--test-animation" || arg == "--test-export" || arg == "--test-export-gpu")
                 mode = arg;
             else if (arg == "--no-redshift")
                 settings.redshift = false;
@@ -136,8 +134,7 @@ int main(int argc, char** argv)
                                                        : rt::RenderSettings::FullScene;
                 if (settings.integrationMode != rt::RenderSettings::FixedRadius &&
                     settings.integrationMode != requested)
-                    throw std::runtime_error(
-                        "Choose either --full-scene-integration or --adaptative, not both");
+                    throw std::runtime_error("Choose either --full-scene-integration or --adaptative, not both");
                 settings.integrationMode = requested;
             }
             else if (arg == "--exposure")
@@ -186,7 +183,7 @@ int main(int argc, char** argv)
                     else if (arg == "--samples")
                         settings.samples = value;
                     else
-                        settings.seed = std::uint32_t(value);
+                        settings.seed = static_cast<std::uint32_t>(value);
                 }
             }
             else if (arg == "--help")
@@ -228,21 +225,18 @@ int main(int argc, char** argv)
         if (mode == "--test-export-gpu")
         {
             rt::SdlGlWindow context(1, 1, true);
-
             return rt::runExportGpuTests(assets, executableDirectory() / "Output");
         }
 
         if (mode == "--test-gpu")
         {
             rt::SdlGlWindow context(1, 1, true);
-
             return rt::runGpuTests(assets);
         }
 
         if (mode == "--benchmark" || mode == "--render")
         {
             benchmark(assets, settings, mode == "--benchmark");
-
             return 0;
         }
 

@@ -151,6 +151,16 @@ namespace rt
             return scene->disk.peakTemperature;
         }
 
+        static real diskHeight()
+        {
+            return scene->disk.scaleHeight;
+        }
+
+        static real diskExtinction()
+        {
+            return scene->disk.extinction;
+        }
+
         static real diskScale()
         {
             return scene->disk.emissionScale;
@@ -441,10 +451,54 @@ namespace rt
         scene.materials = {{{Schwarzschild, 0, 0, 0}, {}}};
         scene.spheres = {{{0, 0, 0, 8}, {0, 0, 0, 0}}};
         scene.disk.enabled = true;
+        scene.disk.scaleHeight = 0.35f;
         require(std::abs(reference::lapseAt({4, 0, 0}) - std::sqrt(0.75)) < 1e-12);
-        require(reference::diskHit({4, 2, 0}, {0, -1, 0}, 0, 100, t) && std::abs(t - 2) < 1e-12);
-        require(!reference::diskHit({0, 2, 0}, {0, -1, 0}, 0, 100, t));
-        require(!reference::diskHit({6, 2, 0}, {0, -1, 0}, 0, 100, t));
+        double entry = 0, end = 0;
+        require(reference::diskInterval({4, 2, 0}, {0, -1, 0}, 100, entry, end));
+        require(entry > 0 && end > entry);
+        require(!reference::diskInterval({6, 2, 0}, {0, -1, 0}, 100, entry, end));
+        require(!reference::diskInterval({-6, 2, 0}, {1, 0, 0}, 100, entry, end));
+        require(reference::diskInterval({4, 0.2, 0}, {1, 0, 0}, 100, entry, end) && entry == 0);
+        require(reference::diskDensity({0, 0, 0}) == 0);
+        require(reference::diskDensity({4, 0.2, 0}) > 0);
+        require(reference::diskDensity({4, 2, 0}) == 0);
+        double transmission = reference::diskTransmission({-6, 0.2, 0}, {1, 0, 0}, 12);
+        require(transmission > 0 && transmission < 0.5);
+        require(reference::diskTransmission({-6, 0.2, 0}, {1, 0, 0}, 0.5) == 1);
+        // The same cloud follows the body's translation and rotation.
+        Vec3 cloudPoint{4, 0.2, 0.4};
+        double density = reference::diskDensity(cloudPoint);
+        auto rotation = rotationFromDegrees({27, 41, -13});
+        setBodyRotation(scene.spheres[0], rotation);
+        scene.spheres[0].centerRadius.x = 7;
+        scene.spheres[0].centerRadius.y = -2;
+        scene.spheres[0].centerRadius.z = 3;
+        Vec3 movedPoint = Vec3{7, -2, 3} + rotateVector(bodyRotation(scene.spheres[0]), cloudPoint);
+        require(std::abs(reference::diskDensity(movedPoint) - density) < 1e-10);
+        scene.spheres[0].centerRadius = {0, 0, 0, 8};
+        setBodyRotation(scene.spheres[0], {});
+
+        // Segment refinement must converge in both opacity and emitted light.
+        auto transfer = [&](int segments)
+        {
+            reference::TraceState ray;
+            reference::initTrace(ray, {4, 0.24, 0.4}, {0, -1, 0}, 1);
+            ray.observerLapse = 1;
+            double step = 0.08 / segments;
+
+            for (int i = 0; i < segments; ++i)
+            {
+                reference::transferDisk(ray, {0, -1, 0}, step);
+                ray.p.y -= step;
+            }
+            return ray;
+        };
+        auto coarse = transfer(1), fine = transfer(2), referenceVolume = transfer(16);
+        require(reference::length(coarse.radiance) > 0 && reference::length(coarse.throughput) < std::sqrt(3.0));
+        require(reference::length(fine.radiance - referenceVolume.radiance) <
+                reference::length(coarse.radiance - referenceVolume.radiance));
+        require(reference::length(fine.throughput - referenceVolume.throughput) < 1e-4);
+
         require(reference::diskTemperature(3) == 0);
         require(std::abs(reference::diskTemperature(49.0 / 12.0) - scene.disk.peakTemperature) < 0.001);
 

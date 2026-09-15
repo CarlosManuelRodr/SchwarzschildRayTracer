@@ -299,6 +299,8 @@ namespace rt
         g.integer("holeIndex", hole);
         g.integer("planetIndex", earth);
         g.integer("thermalOffset", int(scene.texels.size()));
+        glUniform2f(glGetUniformLocation(g.trace, "diskVolume"), scene.disk.scaleHeight,
+                    scene.disk.extinction);
         g.integer("diskOn", scene.disk.enabled ? 1 : 0);
         const auto normal = normalized(scene.disk.normal);
         glUniform3f(glGetUniformLocation(g.trace, "diskAxis"), float(normal.x), float(normal.y),

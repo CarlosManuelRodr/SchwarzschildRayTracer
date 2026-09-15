@@ -503,18 +503,24 @@ namespace rt
 
         auto diskScene = fieldScene();
         diskScene.disk.enabled = true;
-        std::vector<std::array<Vec3, 2>> diskRays = {{Vec3(4, 2, 1), Vec3(0, -1, 0)},
-                                                     {Vec3(-4, 2, 1), Vec3(0, -1, 0)},
-                                                     {Vec3(0, 2, 0), Vec3(0, -1, 0)},
-                                                     {Vec3(4, -2, 0), Vec3(0, 1, 0)}};
-        auto diskResults = gpu.traceRays(diskScene, settings, diskRays);
-
-        for (std::size_t i = 0; i < diskRays.size(); ++i)
+        std::vector<std::array<Vec3, 2>> diskRays = {
+            {Vec3(4, 2, 1), Vec3(0, -1, 0)},   {Vec3(-4, 2, 1), Vec3(0, -1, 0)},
+            {Vec3(0, 2, 0), Vec3(0, -1, 0)},   {Vec3(4, -2, 0), Vec3(0, 1, 0)},
+            {Vec3(-6, 0.2, 1), Vec3(1, 0, 0)}, {Vec3(4, 0.2, 0), Vec3(0, 0, 1)}};
+        for (auto mode :
+             {RenderSettings::FixedRadius, RenderSettings::FullScene, RenderSettings::AdaptiveCutoff})
         {
-            auto reference = traceCpu(diskScene, settings, diskRays[i][0], diskRays[i][1]);
-            require(diskResults[i].status == reference.status &&
-                        distance(diskResults[i].color, reference.color) < 0.002,
-                    "GPU disk/redshift mismatch");
+            auto volumeSettings = settings;
+            volumeSettings.integrationMode = mode;
+            auto diskResults = gpu.traceRays(diskScene, volumeSettings, diskRays);
+
+            for (std::size_t i = 0; i < diskRays.size(); ++i)
+            {
+                auto reference = traceCpu(diskScene, volumeSettings, diskRays[i][0], diskRays[i][1]);
+                require(diskResults[i].status == reference.status && reference.status != 2 &&
+                            distance(diskResults[i].color, reference.color) < 0.002,
+                        "GPU volumetric disk/redshift mismatch");
+            }
         }
 
         for (int kind : {Lambertian, Metal, Dielectric, DiffuseLight})

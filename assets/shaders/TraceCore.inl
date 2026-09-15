@@ -530,10 +530,6 @@ bool negligibleBending(TraceState s, real backgroundRadius)
 
     if (worldHit(s.p, direction, EPS, distance, true, hit))
         distance = hit.t;
-    real diskDistance = real(0);
-
-    if (diskHit(s.p, direction, EPS, distance, diskDistance))
-        distance = diskDistance;
 
     vec3 relative = s.p - center;
     real closestT = clamp(-dot(relative, direction), real(0), distance);
@@ -558,7 +554,7 @@ bool negligibleBending(TraceState s, real backgroundRadius)
  * One full step and two half steps estimate error; dividing their difference by 15
  * accounts for fourth-order step doubling. Both position and tangent errors must fit
  * the absolute/relative tolerances. Rejected steps leave the ray at its previous point.
- * Accepted chords are checked for surfaces, disk, capture, and fixed-region exit before
+ * Accepted chords are checked for surfaces, capture, and fixed-region exit before
  * committing a position. Step limits also bound chord error and resolve nearby geometry.
  * Interior observers may cross the horizon outward while tracing into the past.
  * A finite attempt budget and minimum step turn stalled/nonfinite paths into failures.
@@ -609,7 +605,7 @@ void integrateField(INOUT(TraceState) s)
         }
 
         if (diskEnabled())
-            backgroundRadius = max(backgroundRadius, diskOuter() + real(1));
+            backgroundRadius = max(backgroundRadius, diskOuter() + real(3) * diskHeight() + real(1));
 
         if (integrationMode() == 2 && s.observerMode < 2 && negligibleBending(s, backgroundRadius))
         {
@@ -639,6 +635,11 @@ void integrateField(INOUT(TraceState) s)
         real chordTolerance = absoluteTolerance() + relativeTolerance() * max(real(1), radius);
         stepLimit = min(stepLimit, sqrt(real(8) * chordTolerance / max(curvature, real(1e-20))));
     }
+
+    // Resolve clouds independently of the gravitational error estimate. The
+    // bounding sphere includes the full cylinder and a margin for the next step.
+    if (diskEnabled() && radius < diskOuter() + real(3) * diskHeight() + real(1))
+        stepLimit = min(stepLimit, real(0.08) / speed);
 
     s.step = min(s.step, stepLimit);
     vec3 pf, vf, ph, vh, pn, vn;
@@ -689,12 +690,6 @@ void integrateField(INOUT(TraceState) s)
         eventKind = 2;
     }
 
-    if (diskHit(s.p, delta, real(1e-7), eventT, t))
-    {
-        eventT = t;
-        eventKind = 4;
-    }
-
     if (integrationMode() == 0 && s.observerMode < 2 && length(pn - center) >= sphereRadius(s.field) &&
         dot(delta, pn - center) > real(0) &&
         sphereRoot(s.p, delta, center, sphereRadius(s.field), real(1e-7), eventT, t))
@@ -705,6 +700,10 @@ void integrateField(INOUT(TraceState) s)
 
     vec3 previousV = s.v;
     real segmentLength = length(delta);
+    transferDisk(s, safeUnit(delta), min(eventT, real(1)) * segmentLength);
+
+    if (s.status != 0)
+        return;
     transferAtmosphere(s, safeUnit(delta), min(eventT, real(1)) * segmentLength);
 
     if (eventKind != 0)
@@ -724,22 +723,6 @@ void integrateField(INOUT(TraceState) s)
         scatterSurface(s, hit);
     else if (eventKind == 2)
         s.status = 3;
-    else if (eventKind == 4)
-    {
-#ifdef __cplusplus
-        if (picking)
-        {
-            pickedBody = blackHole();
-            s.status = 1;
-
-            return;
-        }
-#endif
-        if (s.body < 0)
-            s.body = blackHole();
-        s.radiance += s.throughput * diskRadiance(s.p, -s.v, s.observerLapse);
-        s.status = 1;
-    }
     else if (integrationMode() == 0 && s.observerMode < 2 &&
              (eventKind == 3 ||
               (length(s.p - center) >= sphereRadius(s.field) && dot(s.p - center, s.v) > real(0))))
@@ -791,29 +774,28 @@ void advanceTrace(INOUT(TraceState) s)
 
     bool hitWorld = worldHit(s.p, s.v, EPS, real(1e30), integrationMode() != 0, hit);
     real maximum = hitWorld ? hit.t : real(1e30);
-    real diskDistance = real(0);
-    bool hitDisk = diskHit(s.p, s.v, EPS, maximum, diskDistance);
-    transferAtmosphere(s, safeUnit(s.v), (hitDisk ? diskDistance : maximum) * length(s.v));
+    vec3 direction = safeUnit(s.v);
+    real distance = maximum * length(s.v);
+    real entry, end;
 
-    if (hitDisk)
+    if (diskInterval(s.p, direction, distance, entry, end))
     {
-        s.p = s.p + diskDistance * s.v;
-#ifdef __cplusplus
-        if (picking)
-        {
-            pickedBody = blackHole();
-            s.status = 1;
+        // Skip empty space, then process at most one short cloud segment. Store
+        // the new position so long flights yield to input between dispatches.
+        real travel = min(distance, min(end + EPS, entry + real(0.08)));
+        transferDisk(s, direction, travel);
+        transferAtmosphere(s, direction, travel);
 
+        if (s.status != 0)
+            return;
+        if (travel < distance)
+        {
+            s.p += travel * direction;
             return;
         }
-#endif
-        if (s.body < 0)
-            s.body = blackHole();
-        s.radiance += s.throughput * diskRadiance(s.p, -s.v, s.observerLapse);
-        s.status = 1;
-
-        return;
     }
+    else
+        transferAtmosphere(s, direction, distance);
 
     if (!hitWorld)
     {

@@ -245,7 +245,8 @@ namespace rt
         if (disk.enabled &&
             (fields != 1 || !std::isfinite(disk.innerRadius) || disk.innerRadius < 3 ||
              !std::isfinite(disk.outerRadius) || disk.outerRadius <= disk.innerRadius ||
-             !std::isfinite(disk.peakTemperature) || disk.peakTemperature < 1000 ||
+             !std::isfinite(disk.scaleHeight) || disk.scaleHeight <= 0 || !std::isfinite(disk.extinction) ||
+             disk.extinction < 0 || !std::isfinite(disk.peakTemperature) || disk.peakTemperature < 1000 ||
              disk.peakTemperature > 20000 || !std::isfinite(disk.emissionScale) || disk.emissionScale < 0 ||
              !std::isfinite(dot(disk.normal, disk.normal)) || dot(disk.normal, disk.normal) < 1e-12))
         {
