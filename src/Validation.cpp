@@ -142,6 +142,90 @@ namespace rt
         require(std::abs(distance(navigation.position, navigation.lookAt) - 2) < 1e-12,
                 "Pitch clamping must preserve focus distance and a valid basis");
 
+        for (const int kind : {Lambertian, Metal, Dielectric, DiffuseLight, Earth, Moon})
+        {
+            auto body = surfaceScene(kind);
+            CameraData camera;
+            camera.position = {0, 0, 3};
+            camera.lookAt = {0, 0, 1};
+            camera.moveLocal({0, 0, 1}, 10, body);
+            require(camera.position.z > 1 && camera.position.z < 1.001,
+                    "Swept navigation must stop at every solid material, even with a large step");
+            require(distance(camera.lookAt - camera.position, {0, 0, -2}) < 1e-12,
+                    "Collision response must preserve the view direction and focus distance");
+            const auto stopped = camera.position;
+            for (int step = 0; step < 100; ++step)
+                camera.moveLocal({0, 0, 1}, 0.0005, body);
+            require(distance(camera.position, stopped) < 1e-8,
+                    "Repeated precision steps must not creep into the surface");
+            camera.moveLocal({0, 0, -1}, 0.1, body);
+            require(camera.position.z > stopped.z + 0.099,
+                    "The camera must be able to move away from contact");
+
+            camera.position = {0, 0, 3};
+            camera.lookAt = {0, 0, 1};
+            camera.moveTo({0.8, 0, 0}, body);
+            require(distance(camera.position, {}) > 1 && camera.position.x > 0.8,
+                    "Oblique movement must slide along the solid surface");
+            camera.moveTo({0, 0, 0}, body);
+            require(distance(camera.position, {}) > 1,
+                    "Position edits must not enter a solid body");
+
+            camera.position = {};
+            camera.lookAt = {0, 0, -2};
+            camera.moveTo(camera.position, body);
+            require(distance(camera.position, {}) > 1,
+                    "A camera at a body's exact center must recover to a finite exterior position");
+            camera.validate();
+
+            body.spheres[0].centerRadius = {8, -4, 6, 0.25f};
+            camera.position = {8, -4, 8};
+            camera.lookAt = {8, -4, 7};
+            camera.moveTo({8, -4, 4}, body);
+            require(camera.position.z > 6.25 && camera.position.z < 6.251,
+                    "Collision geometry must use the current body center and radius");
+        }
+
+        for (const int kind : {Schwarzschild, Environment})
+        {
+            auto passable = surfaceScene(kind);
+            CameraData camera;
+            camera.position = {0, 0, 3};
+            camera.lookAt = {};
+            camera.moveTo({0, 0, 0.5}, passable);
+            require(distance(camera.position, {0, 0, 0.5}) < 1e-12,
+                    "The black-hole horizon and environment must remain passable");
+            camera.moveTo({0, 0, -3}, passable);
+            require(distance(camera.position, {0, 0, -3}) < 1e-12,
+                    "Passable spheres must not obstruct a complete crossing");
+        }
+
+        auto obstacles = surfaceScene(Earth);
+        obstacles.spheres.push_back({{0, 0, 4, 0.5f}, {}});
+        CameraData collisionCamera;
+        collisionCamera.position = {0, 0, 8};
+        collisionCamera.lookAt = {};
+        collisionCamera.moveTo({0, 0, -8}, obstacles);
+        require(collisionCamera.position.z > 4.5 && collisionCamera.position.z < 4.501,
+                "The nearest collision must win regardless of sphere order");
+        collisionCamera.position = {2, 0, 3};
+        collisionCamera.lookAt = {2, 0, 2};
+        collisionCamera.moveTo({2, 0, -3}, obstacles);
+        require(distance(collisionCamera.position, {2, 0, -3}) < 1e-12,
+                "A clear path must keep its full requested displacement");
+        collisionCamera.position = {0, 0, 1.00002};
+        collisionCamera.lookAt = {0, 0, 0};
+        collisionCamera.moveTo({2, 0, 1.00002}, obstacles);
+        require(distance(collisionCamera.position, {2, 0, 1.00002}) < 1e-12,
+                "Tangential movement outside the surface must remain unobstructed");
+        obstacles.spheres[1].centerRadius = {0.5f, 0, 0, 1};
+        collisionCamera.position = {0.25, 0, 0};
+        collisionCamera.lookAt = {0.25, 0, -1};
+        collisionCamera.moveTo(collisionCamera.position, obstacles);
+        require(distance(collisionCamera.position, {}) > 1 &&
+                    distance(collisionCamera.position, {0.5, 0, 0}) > 1,
+                "Recovery from overlapping edited bodies must leave the camera outside both");
+
         RenderSettings settings;
         settings.observerType = RenderSettings::Hovering;
         CameraData velocityCamera;

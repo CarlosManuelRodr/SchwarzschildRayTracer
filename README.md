@@ -364,6 +364,13 @@ La rotación conserva la posición de la cámara y limita la inclinación a ±89
 para evitar giros invertidos. Arrastrar termina al soltar el botón, salir de la
 ventana, cambiar su tamaño o perder el foco. WASD y las flechas son equivalentes;
 mantener ambas teclas de la misma dirección no duplica la velocidad.
+La navegación de cámara y los campos de posición detectan colisiones con los
+cuerpos sólidos (incluidos Tierra, Sol y Luna). Se comprueba todo el desplazamiento
+para impedir atravesarlos con pasos grandes; al chocar, la cámara se desliza por
+la superficie con un pequeño margen exterior. Mover un cuerpo sobre la cámara o
+restablecerla dentro de un cuerpo la recoloca fuera. El horizonte del agujero negro,
+su región gravitatoria y el fondo estelar siguen siendo transitables. Esta restricción
+se aplica a la navegación interactiva; las trayectorias de animación conservan sus poses.
 Al ampliar mucho la ventana, la resolución interna se ajusta al límite de SSBO
 del controlador (y a un presupuesto de 256 MiB de estados), conservando la
 proporción. La barra de título muestra la resolución interna; el PNG usa ese

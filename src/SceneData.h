@@ -318,6 +318,18 @@ namespace rt
          */
         void moveLocal(const Vec3 &direction, double distance);
 
+        /** @brief Navigate with swept solid-body collisions and surface sliding. */
+        void moveLocal(const Vec3 &direction, double distance, const SceneData &scene);
+
+        /**
+         * @brief Move toward a world position, stopping/sliding at solid spheres.
+         * Preserves the view direction and target distance. Schwarzschild and Environment
+         * are passable. Uses a small surface clearance in horizon units. Passing the
+         * current position repairs overlaps after body edits or a camera reset.
+         * Requires a valid scene. This is navigation, independent of ray integration.
+         */
+        void moveTo(const Vec3 &destination, const SceneData &scene);
+
         /**
          * @brief Rotate the look direction while preserving target distance.
          * @param yaw Horizontal angle in radians.

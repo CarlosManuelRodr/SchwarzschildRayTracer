@@ -456,7 +456,7 @@ int main(int argc, char** argv)
                     if (rt::dot(movement, movement) > 0)
                     {
                         camera.moveLocal(movement, (event.key.mod & SDL_KMOD_SHIFT) ? slowMovementStep
-                                                                                    : normalMovementStep);
+                                                                                    : normalMovementStep, scene);
                         reset = true;
                         tapped = true;
                     }
@@ -588,20 +588,21 @@ int main(int argc, char** argv)
                 center.y = float(actions.bodyPosition.y);
                 center.z = float(actions.bodyPosition.z);
                 rt::setBodyRotation(scene.spheres[actions.body], actions.bodyOrientation);
+                camera.moveTo(camera.position, scene);
                 geometryDirty = true;
                 reset = true;
             }
 
             if (actions.positionChanged)
             {
-                camera.lookAt += actions.position - camera.position;
-                camera.position = actions.position;
+                camera.moveTo(actions.position, scene);
                 reset = true;
             }
 
             if (actions.resetCamera)
             {
                 camera = initialCamera;
+                camera.moveTo(camera.position, scene);
                 reset = true;
             }
 
@@ -656,7 +657,7 @@ int main(int argc, char** argv)
                 {
                     bool slow = key(SDLK_LSHIFT) || key(SDLK_RSHIFT);
                     double speed = slow ? slowMovementStep / normalMovementStep : 1.0;
-                    camera.moveLocal(movement, dt * speed);
+                    camera.moveLocal(movement, dt * speed, scene);
                     reset = true;
                 }
             }

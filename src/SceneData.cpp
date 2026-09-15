@@ -129,6 +129,108 @@ namespace rt
         lookAt += displacement;
     }
 
+    void CameraData::moveLocal(const Vec3 &direction, const double distance, const SceneData &scene)
+    {
+        auto requested = *this;
+        requested.moveLocal(direction, distance);
+        moveTo(requested.position, scene);
+    }
+
+    void CameraData::moveTo(const Vec3 &destination, const SceneData &scene)
+    {
+        auto solid = [&](const SphereData &sphere)
+        {
+            const int kind = scene.materials[sphere.material.x].kindTexture.x;
+            return kind != Schwarzschild && kind != Environment;
+        };
+        auto center = [](const SphereData &sphere)
+        {
+            const auto &p = sphere.centerRadius;
+            return Vec3{p.x, p.y, p.z};
+        };
+        auto radius = [](const SphereData &sphere)
+        {
+            // Keep the observer outside the surface even after GPU float conversion.
+            return double(sphere.centerRadius.w) + 1e-5 * std::max(1.0, double(sphere.centerRadius.w));
+        };
+
+        Vec3 point = position;
+        Vec3 remaining = destination - position;
+        // Body edits and resets can start inside a sphere. Repeat for overlapping bodies.
+        for (int pass = 0; pass < 32; ++pass)
+        {
+            bool overlap = false;
+            for (const auto &sphere : scene.spheres)
+            {
+                if (!solid(sphere))
+                    continue;
+                const Vec3 offset = point - center(sphere);
+                const double length = std::sqrt(dot(offset, offset));
+                const double r = radius(sphere);
+                if (length < r)
+                {
+                    point = center(sphere) + (length > 1e-20 ? offset / length : Vec3{1, 0, 0}) *
+                                                (r + 1e-9 * std::max(1.0, r));
+                    overlap = true;
+                }
+            }
+            if (!overlap)
+                break;
+            if (pass == 31)
+            {
+                // Deeply overlapping edited bodies can cycle under radial projection.
+                // A point beyond every solid's +X extent is always outside their union.
+                for (const auto &sphere : scene.spheres)
+                    if (solid(sphere))
+                        point.x = std::max(point.x, center(sphere).x + radius(sphere) * 1.000001);
+            }
+        }
+
+        // Sweep the whole segment, including steps whose endpoints lie on opposite sides.
+        // Re-sweep after each slide so another body cannot be crossed by the remainder.
+        for (int contact = 0; contact < 8; ++contact)
+        {
+            const double length = std::sqrt(dot(remaining, remaining));
+            if (length < 1e-12)
+                break;
+            const Vec3 direction = remaining / length;
+            double travel = length;
+            const SphereData *hit = nullptr;
+            for (const auto &sphere : scene.spheres)
+            {
+                if (!solid(sphere))
+                    continue;
+                const Vec3 offset = point - center(sphere);
+                const double b = dot(offset, direction);
+                if (b >= 0)
+                    continue;
+                const double r = radius(sphere);
+                const Vec3 closest = offset - b * direction;
+                const double discriminant = r * r - dot(closest, closest);
+                if (discriminant <= 0)
+                    continue;
+                const double entry = std::max(0.0, -b - std::sqrt(discriminant));
+                if (entry <= travel)
+                {
+                    travel = entry;
+                    hit = &sphere;
+                }
+            }
+            if (!hit)
+            {
+                point += remaining;
+                break;
+            }
+            const double advance = std::max(0.0, travel - 1e-9 * std::max(1.0, radius(*hit)));
+            point += advance * direction;
+            remaining = (length - advance) * direction;
+            const Vec3 normal = normalized(point - center(*hit));
+            remaining = remaining - std::min(0.0, dot(remaining, normal)) * normal;
+        }
+        lookAt += point - position;
+        position = point;
+    }
+
     void CameraData::rotateView(const double yaw, const double pitch)
     {
         const Vec3 offset = lookAt - position;
