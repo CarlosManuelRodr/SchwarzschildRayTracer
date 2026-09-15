@@ -208,56 +208,62 @@ derivation, reference-frame conventions, frequency shifts, validation, and model
 limitations. Interior light sources and gravitational collapse history are not
 modeled; some past directions therefore remain dark. Exposure can help inspect
 faint incoming light.
-Ray tracer con desviación relativista de rayos de luz basado en la métrica de Schwarzschild.
+This is a relativistic ray tracer based on the Schwarzschild metric.
 
-El renderizador actual usa **OpenGL 4.3 compute shaders** para trazar los rayos,
-integrar sus trayectorias y acumular muestras en la GPU. La ventana muestra un
-render progresivo; C++ y SDL se encargan de los controles y la exportación PNG.
+The current renderer uses **OpenGL 4.3 compute shaders** to trace rays,
+integrate their paths, and accumulate samples on the GPU. The application shows
+a progressive render; C++ and SDL provide the controls and PNG export.
 
 ![ExampleImage](https://raw.githubusercontent.com/CarlosManuelRodr/SchwarzschildRayTracer/master/Images/Animation.gif)
 
-## Descargar
-La siguiente descarga corresponde a la versión antigua de CPU. Para usar el
-renderizador GPU, compila el código actual con las instrucciones de abajo:
+## Download
 
-[Descargar](https://github.com/CarlosManuelRodr/SchwarzschildRayTracer/releases/download/v1.0/SchwarzschildRayTracer_x64.zip)
+The following download is for the legacy CPU version. To use the GPU renderer,
+build the current code with the instructions below:
 
-En caso de que la aplicación falle al iniciar es necesario ejecutar el instalador `vcredist_x64.exe` que se encuentra junto al ejecutable principal.
+[Download](https://github.com/CarlosManuelRodr/SchwarzschildRayTracer/releases/download/v1.0/SchwarzschildRayTracer_x64.zip)
 
-## Diseño
-La implementación está basada en un ray tracer construido a partir del excelente [libro](http://in1weekend.blogspot.com/2016/01/ray-tracing-in-one-weekend.html "raytracing") *Ray Tracing in One Weekend* de Peter Shirley.
+If the application fails to start, run the `vcredist_x64.exe` installer next to
+the main executable.
 
-El cálculo de la ecuación que simula la desviación de un rayo está basado en la derivación hecha para el proyecto [starless](http://rantonels.github.io/starless/) y su [documentación](http://spiro.fisica.unipd.it/~antonell/schwarzschild/).
-La libreta que se encuentra "*References/DesignDocument.nb*" contiene todos los pasos del desarrollo de las ecuaciones.
+## Design
 
-Se puede encontrar información adicional en el siguiente artículo:
+The implementation is based on a ray tracer built from Peter Shirley's excellent
+[book](http://in1weekend.blogspot.com/2016/01/ray-tracing-in-one-weekend.html "raytracing"), *Ray Tracing in One Weekend*.
+
+The calculation of the ray-deflection equation is based on the derivation for the
+[starless](http://rantonels.github.io/starless/) project and its
+[documentation](http://spiro.fisica.unipd.it/~antonell/schwarzschild/). The
+`docs/DesignDocument.nb` notebook contains the derivation steps.
+
+Additional information is available in the following article:
 *Orbits of massless particles in the Schwarzschild metric: Exact solutions American Journal of Physics 82, 564 (2014)*
 
-## Compilación
+## Building
 
-El proyecto usa CMake y [vcpkg](https://vcpkg.io/) en Windows y Linux. El
-manifiesto `vcpkg.json` instala automáticamente SDL 3.4.16, Dear ImGui y GLEW durante la
-configuración. SDL se fija a la versión exacta 3.4.16 tanto en el manifiesto
-como en CMake.
+The project uses CMake and [vcpkg](https://vcpkg.io/) on Windows and Linux. The
+`vcpkg.json` manifest automatically installs SDL 3.4.16, Dear ImGui, and GLEW
+during configuration. SDL is pinned to exactly version 3.4.16 in both the
+manifest and CMake.
 
-Requisitos:
+Requirements:
 
-- CMake 3.21 o posterior
-- Un compilador compatible con C++17
-- Una GPU y controlador con OpenGL 4.3 (NVIDIA, AMD o Intel); no requiere CUDA
-- vcpkg, con la variable de entorno `VCPKG_ROOT` apuntando a su directorio
+- CMake 3.21 or later
+- A C++17-compatible compiler
+- A GPU and driver supporting OpenGL 4.3 (NVIDIA, AMD, or Intel); CUDA is not required
+- vcpkg, with the `VCPKG_ROOT` environment variable pointing to its directory
 
 ```sh
 cmake --preset default
 cmake --build --preset default
 ```
 
-El ejecutable se genera en `build/` (o en `build/Release/` con generadores
-multiconfiguración). CMake copia las texturas y shaders junto al ejecutable en
-cada compilación. Los recursos se buscan junto al ejecutable, independientemente
-del directorio de trabajo. `--assets DIR` permite especificar otra carpeta.
+The executable is generated in `build/` (or `build/Release/` with multi-config
+generators). CMake copies textures and shaders next to the executable on every
+build. Assets are found next to the executable regardless of the working
+directory; `--assets DIR` selects another asset folder.
 
-Sin presets, se puede configurar explícitamente el toolchain:
+Without presets, configure the toolchain explicitly:
 
 ```sh
 cmake -S . -B build \
@@ -266,35 +272,34 @@ cmake -S . -B build \
 cmake --build build --config Release
 ```
 
-SDL gestiona la ventana, el contexto OpenGL, los eventos de teclado/ratón y
-la exportación PNG con [`SDL_SavePNG`](https://wiki.libsdl.org/SDL3/SDL_SavePNG).
-Las texturas JPEG usan `stb_image.h`, ya incluido en el repositorio: SDL 3.4.16
-solo carga BMP/PNG de forma integrada. No se necesita SDL_image.
-Esta migración conserva el backend OpenGL 4.3 de escritorio. La compilación
-WebAssembly y un backend compatible con navegador quedan para una etapa posterior.
+SDL manages the window, OpenGL context, keyboard/mouse events, and PNG export
+through [`SDL_SavePNG`](https://wiki.libsdl.org/SDL3/SDL_SavePNG). JPEG textures
+use the bundled `stb_image.h`, because SDL 3.4.16 natively loads only BMP and PNG.
+SDL_image is not required. This migration retains the desktop OpenGL 4.3 backend;
+WebAssembly support and a browser-compatible backend remain future work.
 
-## Uso
+## Usage
 
-Al iniciar se abre una ventana maximizada con paneles acoplados: **Scene**, **Viewport**,
-**Inspector**, **Camera**, **Render Settings** y **Timeline**. Los cambios válidos se
-aplican automáticamente; las opciones de render reinician las muestras tras 150 ms
-sin editar, conservando la última imagen completa.
+At startup, a maximized window opens with docked **Scene**, **Viewport**,
+**Inspector**, **Camera**, **Render Settings**, and **Timeline** panels. Valid
+changes apply automatically; render options restart sampling after 150 ms without
+edits while preserving the last complete image.
 
-- **Render Settings:** muestras, exposición, resolución y redshift. Integración y
-  semilla se encuentran en **Advanced**. *Match viewport resolution* sigue el área
-  disponible del visor; una resolución fija conserva su proporción.
-- **Camera:** navegación de precisión y velocidad física del observador. Ctrl+clic
-  en un deslizador permite introducir un valor exacto.
-- **File > Save Image...:** abre un diálogo para guardar la imagen PNG sin interfaz.
-- **View:** muestra/oculta paneles, bloquea el acoplamiento y restaura la distribución.
-  **F1** oculta/restaura temporalmente la interfaz completa. La distribución se guarda.
+- **Render Settings:** samples, exposure, resolution, and redshift. Integration
+  and seed are in **Advanced**. *Match viewport resolution* follows the available
+  viewport area; a fixed resolution retains its aspect ratio.
+- **Camera:** precision navigation and physical observer velocity. Ctrl-click a
+  slider to enter an exact value.
+- **File > Save Image...:** opens a dialog to save the UI-free PNG image.
+- **View:** shows/hides panels, locks docking, and restores the layout. **F1**
+  temporarily hides/restores the complete interface. The layout is saved.
 
-El teclado de navegación funciona con el visor enfocado. Los controles y atajos
-están descritos en **Help > Controls and Shortcuts**.
+Navigation keys work when the viewport is focused. Controls and shortcuts are
+described in **Help > Controls and Shortcuts**.
 
 
-Las opciones de consola se conservan para compatibilidad, configuración inicial,
-pruebas y renders por lotes; el uso interactivo no necesita argumentos:
+Console options are retained for compatibility, initial configuration, testing,
+and batch renders; interactive use requires no arguments:
 
 ```powershell
 .\build\Release\SchwarzschildRayTracer.exe
@@ -303,249 +308,188 @@ pruebas y renders por lotes; el uso interactivo no necesita argumentos:
 .\build\Release\SchwarzschildRayTracer.exe --no-redshift
 ```
 
-En Linux, usa `./build/SchwarzschildRayTracer` con las mismas opciones.
+On Linux, use `./build/SchwarzschildRayTracer` with the same options.
 
-Modos de integración (excluyentes; también funcionan con `--render` y `--benchmark`):
+Integration modes (mutually exclusive; they also work with `--render` and
+`--benchmark`):
 
-| Opción | Comportamiento |
+| Option | Behavior |
 | --- | --- |
-| Sin opción adicional | **Predeterminado:** radio fijo 5.5, rayos rectos fuera e integración dentro, como antes |
-| `--full-scene-integration` | Integración continua desde la cámara hasta los objetos/fondo |
-| `--adaptative` | Corte según error estimado por trayectoria; integra cuando no puede omitir la curvatura con la tolerancia configurada |
+| No additional option | **Default:** fixed radius 5.5, straight rays outside and integration inside, as before |
+| `--full-scene-integration` | Continuous integration from the camera to objects/background |
+| `--adaptative` | Cuts off according to estimated per-path error; integrates when curvature cannot be skipped at the configured tolerance |
 
-La consola y el título muestran el modo activo. Combinar los dos flags produce
-un error explícito. Las vistas previas de navegación conservan el modo elegido.
-En `--adaptative`, se estima la aceleración máxima dentro de un tubo alrededor
-del segmento recto hasta el siguiente objeto o fondo. Se acepta el tramo
-recto si los límites estimados de desplazamiento y cambio de dirección satisfacen
-`absoluteTolerance` y `relativeTolerance` de `RenderSettings` (1e-6 y 1e-4).
-No se omiten tramos que pasan a menos de tres radios de horizonte. Es una
-aproximación conservadora por tramo entre superficies, no una garantía de error
-final por píxel ni de visibilidad idéntica en siluetas rasantes. Puede costar tanto
-como la integración completa cuando no logra descartar suficiente curvatura.
+The console and title show the active mode. Combining both flags produces an
+explicit error, and navigation previews retain the selected mode. In
+`--adaptative`, the maximum acceleration is estimated inside a tube around the
+straight segment to the next object or background. The straight segment is
+accepted when estimated displacement and direction-change bounds satisfy
+`RenderSettings::absoluteTolerance` and `relativeTolerance` (1e-6 and 1e-4).
+Segments passing within three horizon radii are never skipped. This is a
+conservative approximation for each segment between surfaces, not a guarantee
+of final per-pixel error or identical grazing-silhouette visibility. It can cost
+as much as full integration when insufficient curvature can be discarded.
 
-`--exposure N` controla la exposición lineal (positivo; 1 por defecto).
-`--slow-step N` configura la distancia de un toque con Shift, en radios de horizonte
-(0 < N < 0.05; predeterminado 0.0005). Mantener las teclas mueve a 20*N unidades
-por segundo; ambos Shift funcionan y pueden pulsarse/soltarse durante el movimiento.
-Por ejemplo, `--slow-step 0.0001` permite pasos de 0.0001 y velocidad de 0.002
-unidades por segundo mientras se mantiene Shift.
-`--no-redshift` desactiva los cambios gravitatorios y Doppler para comparar.
-`--render` guarda un render GPU en `Output/render-gpu.png` y termina, sin ejecutar
-el benchmark CPU. La ventana interactiva conserva la exportación manual con P.
+`--exposure N` controls linear exposure (positive; default 1). `--slow-step N`
+sets the distance of a Shift tap in horizon radii (0 < N < 0.05; default 0.0005).
+Holding a movement key moves at 20*N units per second; either Shift key can be
+pressed or released while moving. `--no-redshift` disables gravitational and
+Doppler shifts for comparison. `--render` saves a GPU render to
+`Output/render-gpu.png` and exits without running the CPU benchmark.
 
-| Control | Acción |
+| Control | Action |
 | --- | --- |
-| Clic izquierdo + arrastrar | Girar la vista (derecha/izquierda y arriba/abajo) |
-| ↑ / W, ↓ / S | Avanzar / retroceder en la dirección de la vista |
-| ← / A, → / D | Desplazarse lateralmente respecto a la vista |
-| Q / E | Subir / bajar la cámara y su objetivo |
-| Shift + flechas / WASD / Q / E | Movimiento de precisión (100 veces más lento por defecto) |
-| P | Elegir ubicación y guardar la imagen mostrada como PNG |
-| F1 | Ocultar / restaurar la interfaz |
-| Escape | Detener reproducción, cancelar exportación o deseleccionar |
+| Left-click + drag | Rotate the view horizontally and vertically |
+| Up / W, Down / S | Move forward / backward in the view direction |
+| Left / A, Right / D | Move sideways relative to the view |
+| Q / E | Raise / lower the camera and its target |
+| Shift + movement keys | Precision movement (100 times slower by default) |
+| P | Choose a location and save the displayed image as PNG |
+| F1 | Hide / restore the interface |
+| Escape | Stop playback, cancel export, or deselect |
 
-Durante la navegación se calculan vistas previas de una muestra a un cuarto del
-ancho y alto de render (200×150 para una ventana de 800×600). Solo se muestran al
-terminar todos sus píxeles; mientras tanto permanece la última imagen completa.
-Cada vista previa termina antes de recoger la posición más reciente de la cámara,
-evitando que el movimiento continuo cancele siempre los rayos lentos.
-Después de 150 ms sin movimiento, al terminar la vista previa en curso, se vuelve
-a resolución completa y al objetivo de muestras (30 por defecto). La primera
-pasada completa también se exige antes de sustituir la vista previa. Los píxeles
-rápidos esperan a los lentos antes de empezar la segunda muestra; después se
-refina progresivamente. Esto elimina el falso crecimiento de la sombra provocado
-por píxeles sin calcular, a cambio de la latencia de una pasada completa.
-La barra de título indica `preview` o `refine`, resolución de trabajo, promedio de
-muestras, tiempo del último lote GPU y rayos inválidos. P exporta la imagen
-completa mostrada, con su resolución y exposición, incluso mientras se calcula
-otra vista. No se guardan imágenes automáticamente en modo interactivo.
-La rotación conserva la posición de la cámara y limita la inclinación a ±89°
-para evitar giros invertidos. Arrastrar termina al soltar el botón, salir de la
-ventana, cambiar su tamaño o perder el foco. WASD y las flechas son equivalentes;
-mantener ambas teclas de la misma dirección no duplica la velocidad.
-La navegación de cámara y los campos de posición detectan colisiones con los
-cuerpos sólidos (incluidos Tierra, Sol y Luna). Se comprueba todo el desplazamiento
-para impedir atravesarlos con pasos grandes; al chocar, la cámara se desliza por
-la superficie con un pequeño margen exterior. Mover un cuerpo sobre la cámara o
-restablecerla dentro de un cuerpo la recoloca fuera. El horizonte del agujero negro,
-su región gravitatoria y el fondo estelar siguen siendo transitables. Esta restricción
-se aplica a la navegación interactiva; las trayectorias de animación conservan sus poses.
-Al ampliar mucho la ventana, la resolución interna se ajusta al límite de SSBO
-del controlador (y a un presupuesto de 256 MiB de estados), conservando la
-proporción. La barra de título muestra la resolución interna; el PNG usa ese
-tamaño. Esto evita que maximizar la ventana exceda la memoria admitida por el
-shader. Las dimensiones explícitas de línea de comandos que excedan el límite
-producen un error en lugar de cambiar silenciosamente el benchmark.
+During navigation, the application calculates one-sample previews at one quarter
+of render width and height (200x150 for an 800x600 window). A preview is shown
+only after every pixel completes, so the last complete image remains visible
+until then. After 150 ms without movement, rendering returns to full resolution
+and the sample target (30 by default). The title shows `preview` or `refine`,
+working resolution, average samples, latest GPU-batch time, and invalid rays.
+Camera movement and position fields prevent collisions with solid bodies,
+including Earth, Sun, and Moon; the horizon, gravitational region, and star
+background remain traversable. Very large windows are limited by the driver's
+SSBO capacity and a 256 MiB ray-state budget while preserving aspect ratio.
 
-En portátiles híbridos, el ejecutable solicita la GPU de alto rendimiento mediante
-las indicaciones de [NVIDIA](https://developer.download.nvidia.com/devzone/devcenter/gamegraphics/files/OptimusRenderingPolicies.pdf)
-y [AMD](https://gpuopen-librariesandsdks.github.io/doc/AMD-CrossFire-guide-for-Direct3D11-applications.pdf).
-La selección del sistema/usuario tiene prioridad; confirma la GPU en el título.
-Si no se puede crear el contexto OpenGL requerido o compilar un shader, el programa
-termina con un error explícito; no cambia silenciosamente al renderizador CPU.
-macOS no está soportado por este backend OpenGL 4.3.
+On hybrid laptops, the executable requests the high-performance GPU using the
+[NVIDIA](https://developer.download.nvidia.com/devzone/devcenter/gamegraphics/files/OptimusRenderingPolicies.pdf)
+and [AMD](https://gpuopen-librariesandsdks.github.io/doc/AMD-CrossFire-guide-for-Direct3D11-applications.pdf)
+guidance. System/user selection takes precedence. If the required OpenGL context
+cannot be created or a shader cannot compile, the program exits with an explicit
+error; it does not silently switch to the CPU renderer. macOS is unsupported by
+this OpenGL 4.3 backend.
 
-## Modelo numérico y arquitectura
+## Numerical model and architecture
 
-- `SceneData` almacena esferas, materiales, texturas y texels RGB lineales mediante
-  índices y bloques con alineación de 16 bytes. Soporta Lambertian, Metal,
-  Dielectric, DiffuseLight, Schwarzschild, Earth, Environment y texturas Constant,
-  Checker e Image.
-- `GpuRenderer` recibe una escena y `RenderSettings`, reinicia la cámara, despacha
-  trabajo, consulta su finalización y presenta la acumulación con un triángulo.
-  El propietario mantiene un contexto OpenGL activo hasta destruir el renderer.
-  Se llama `poll()` entre despachos; solo hay un lote en vuelo. El framebuffer se
-  descarga únicamente para exportación, validación o benchmark.
-- Cada invocación realiza hasta 64 transiciones de un rayo antes de guardar su
-  estado en un SSBO; también cede el control al completar una muestra para acotar
-  los lotes con iluminación costosa. Los rayos largos continúan en despachos posteriores. Las
-  barreras de memoria y un fence coordinan cómputo, presentación y lectura.
-- `assets/shaders/TraceCore.inl` contiene las ecuaciones compartidas entre GLSL
-  (float) y la referencia CPU (double). El RNG es independiente por píxel/muestra
-  y reproducible con una semilla fija. La CPU de referencia usa todos los núcleos,
-  sin el generador aleatorio global compartido del código anterior.
-- Con `--full-scene-integration`, la gravedad actúa **en toda la escena**, desde la cámara hasta la superficie o
-  el fondo, con un horizonte de radio 1. El radio histórico 5.5 del registro
-  Schwarzschild no interviene en las trayectorias de este modo; no hay transición a rayos
-  rectos. Se sigue admitiendo un único agujero negro sin rotación.
-- `r = posición - centro` y `h² = |r × velocidad|²` dan
-  `aceleración = -1.5 h² r / |r|⁵`. La integración RK4 adaptativa compara un paso
-  completo con dos medios pasos: tolerancia relativa `1e-4`, absoluta `1e-6`, paso
-  base `0.05`. En modo fijo, este valor es el máximo absoluto dentro de la región.
-  En los otros modos, el límite crece suavemente como `max(1, r²/9)` lejos del agujero,
-  acotado además por distancia radial, proximidad a superficies, espesor atmosférico
-  y error de curvatura del segmento. La velocidad no se normaliza entre pasos.
-  Los cruces de horizonte y superficies se detectan sobre segmentos aceptados;
-  su localización converge al reducir el paso y las tolerancias.
-- La esfera de fondo estelar (radio 200 en la escena inicial) termina los rayos
-  como superficie emisiva. En escenas de prueba sin fondo envolvente, el cielo
-  procedural se evalúa al salir de una esfera que contiene los objetos (radio
-  mínimo 10); no es una continuación rectilínea ni una solución hasta el infinito.
-- Se admiten objetos interceptados durante toda la integración. Se limitan las
-  trayectorias a 50 interacciones y cada tramo entre dispersiones
-  gravitatorio a 16,384 intentos. Agotar el presupuesto o producir valores no
-  finitos termina el rayo negro y aumenta el diagnóstico; capturarlo por el
-  horizonte es un resultado normal. Las órbitas casi críticas pueden necesitar
-  más trabajo y ser sensibles a precisión/tolerancia.
-- La radiancia se acumula en HDR lineal. Para pantalla y PNG se aplica exposición,
-  bloom suave de altas luces, una curva fílmica tipo ACES y codificación sRGB.
-  El bloom representa dispersión óptica de la cámara, no gas adicional.
-  La lectura para validación conserva los valores lineales sin esos efectos.
+- `SceneData` stores spheres, materials, textures, and linear RGB texels with
+  indices and 16-byte-aligned blocks. It supports Lambertian, Metal, Dielectric,
+  DiffuseLight, Schwarzschild, Earth, Environment, Constant, Checker, and Image.
+- `GpuRenderer` receives a scene and `RenderSettings`, resets the camera,
+  dispatches work, polls for completion, and presents accumulation with a triangle.
+  Only one batch is in flight; framebuffer download is reserved for export,
+  validation, and benchmarking.
+- Each invocation performs up to 64 ray transitions before preserving state in
+  an SSBO. Long rays continue in later dispatches; memory barriers and a fence
+  coordinate compute, presentation, and readback.
+- `assets/shaders/TraceCore.inl` contains equations shared by GLSL (`float`) and
+  the CPU reference (`double`). The random generator is independent per
+  pixel/sample and reproducible with a fixed seed.
+- With `--full-scene-integration`, gravity acts throughout the scene from camera
+  to surface or background, with a horizon radius of 1. The historical 5.5
+  Schwarzschild-coordinate radius is not used in this mode.
+- `r = position - center` and `h^2 = |r x velocity|^2` give
+  `acceleration = -1.5 h^2 r / |r|^5`. Adaptive RK4 compares one full step with
+  two half steps using relative tolerance `1e-4`, absolute tolerance `1e-6`, and
+  base step `0.05`. Velocity is not normalized between steps.
+- The stellar-background sphere ends rays as an emissive surface. Rays support
+  up to 50 interactions and 16,384 gravity-step attempts between scattering
+  events. Nonfinite values or an exhausted budget terminate a ray and increment
+  diagnostics; horizon capture is a normal outcome.
+- Radiance accumulates in linear HDR. Display and PNG output apply exposure,
+  soft highlight bloom, an ACES-like filmic curve, and sRGB encoding.
 
-Los headers antiguos del trazador v1.0 permanecen como referencia histórica;
-no forman parte del pipeline compilado.
+Legacy v1.0 tracer headers remain as historical reference and are not part of
+the compiled pipeline.
 
-## Disco, redshift e iluminación
+## Disk, redshift, and lighting
 
-El disco es un volumen de gas con emisión y absorción, entre 3 y 5.2 radios de
-horizonte, con una altura gaussiana de 0.10 radios en el borde exterior.
-Su borde interior coincide con la órbita circular estable más interna de
-Schwarzschild. La temperatura sigue `T⁴ ∝ r⁻³ (1 − √(r_in/r))`, con un máximo
-configurable de 6000 K en la escena inicial. Es el perfil de un
-[disco delgado con torque nulo en el borde interior](https://www.aanda.org/articles/aa/pdf/2013/12/aa21424-13.pdf).
-Las intersecciones siguen los segmentos integrados, por lo que aparecen la cara
-lejana y las imágenes secundarias por lente gravitatoria. Una perturbación
-procedural estática de la emisividad añade estructura irregular; no simula fluidos.
+The accretion disk is an emitting and absorbing gas volume from 3 to 5.2 horizon
+radii, with a Gaussian height of 0.10 radii at its outer edge. Its inner edge is
+the innermost stable circular Schwarzschild orbit. Temperature follows
+`T^4 proportional to r^-3 (1 - sqrt(r_in/r))`, with a configurable 6000 K peak
+in the initial scene. This is the profile of a
+[zero-torque thin disk](https://www.aanda.org/articles/aa/pdf/2013/12/aa21424-13.pdf).
+Integrated segments reveal the far side and gravitationally lensed secondary
+images; static procedural emissivity perturbation adds irregular structure but
+does not simulate fluid dynamics.
 
-Se calcula el factor gravitatorio entre emisor y observador con
-`α(r) = √(1 − 1/r)`. Para gas en órbita circular se combina con Doppler relativista,
-incluyendo dilatación temporal y brillo asimétrico. La dirección del fotón se
-evalúa en el marco ortonormal del observador estático local. Las fuentes térmicas
-se evalúan a `g*T`: la transformación espectral conserva `Iν/ν³`, sin aplicar
-otra vez un factor bolométrico. La conversión de Planck a RGB integra el espectro
-visible usando las [aproximaciones CIE de Wyman, Sloan y Shirley](https://jcgt.org/published/0002/02/01/paper.pdf),
-en una tabla compartida por CPU/GPU. Para fuentes RGB sin espectro se usa la
-aproximación bolométrica `g⁴`, que cambia intensidad pero no reconstruye colores
-espectrales. El redshift se evalúa en toda la escena en los tres modos; la
-integración geométrica sigue la opción elegida.
+The gravitational factor between emitter and observer is `alpha(r) = sqrt(1 - 1/r)`.
+Circular disk gas also receives relativistic Doppler shift, time dilation, and
+asymmetric brightness. Thermal sources are evaluated at `g*T`; spectral transfer
+preserves `I_nu/nu^3`. Planck-to-RGB conversion uses the
+[Wyman, Sloan, and Shirley CIE approximations](https://jcgt.org/published/0002/02/01/paper.pdf).
+RGB sources without a spectrum use the bolometric `g^4` approximation.
 
-El Sol emite como cuerpo negro de 5778 K con oscurecimiento hacia el limbo.
-La Tierra recibe iluminación directa del Sol y del disco mediante muestreo de
-área, con sombras, caída geométrica, reflexión difusa y reflejos GGX en el océano.
-Una atmósfera exponencial añade extinción y dispersión Rayleigh simple de la luz
-solar. El mapa de color existente aproxima la distinción océano/tierra por color;
-no contiene máscaras físicas, relieve, nubes volumétricas ni luces nocturnas.
-El fondo estelar es emisivo. Las intensidades, tamaños y separaciones de esta
-escena ilustrativa no representan el Sistema Solar a escala física.
+The Sun emits as a 5778 K blackbody with limb darkening. Earth receives direct
+Sun and disk area lighting, shadows, geometric falloff, diffuse reflection, and
+GGX ocean highlights. An exponential atmosphere adds extinction and simple
+Rayleigh scattering. Lighting and shadow paths to sources are straight; the
+renderer does not solve geodesics between every surface and light. Kerr rotation,
+fluid dynamics, and temporal disk evolution are not modeled.
 
-`SceneData::disk` configura radios, temperatura, intensidad, normal, altura (`scaleHeight`)
-y extinción (`extinction`);
-`atmosphereHeight` configura el espesor atmosférico. En materiales DiffuseLight,
-`parameters.y/z/w` representan temperatura, escala de radiancia y coeficiente
-de limbo. Una temperatura cero conserva la emisión RGB del material original.
+`SceneData::disk` configures radii, temperature, intensity, normal, scale height,
+and extinction. `atmosphereHeight` controls atmospheric thickness. For
+DiffuseLight materials, `parameters.y/z/w` represent temperature, radiance scale,
+and limb coefficient; zero temperature preserves the material's original RGB
+emission.
 
-Las conexiones de iluminación y sombra hacia las fuentes son rectas; no se
-resuelven geodésicas entre cada superficie y cada luz. La Tierra usa iluminación
-directa, y la atmósfera dispersión simple solar, sin iluminación volumétrica del
-disco ni múltiples rebotes atmosféricos. El disco tiene espesor y autoabsorción volumétrica, pero no dinámica de fluidos
-ni evolución temporal. No se implementa rotación Kerr.
-
-## Pruebas y rendimiento
+## Tests and performance
 
 ```sh
 ctest --test-dir build -C Release --output-on-failure
-# Solo pruebas CPU en máquinas sin contexto gráfico:
+# CPU-only tests on machines without a graphics context:
 ctest --test-dir build -C Release -R cpu_reference --output-on-failure
 ```
 
-También se pueden ejecutar `--test-cpu` y `--test-gpu` directamente. Las pruebas
-GPU requieren una sesión gráfica y crean un contexto oculto. Comprueban captura,
-escape, rayos rasantes y casi críticos contra double, invariancia por traslación,
-convergencia CPU, todos los materiales/texturas, cancelación, cambio de tamaño,
-repetibilidad, presentación sRGB, orientación PNG y errores de recursos.
-También verifican el perfil térmico del disco, los factores gravitatorios y Doppler,
-el limbo solar, iluminación diurna/nocturna y oclusión en la Tierra, y rayos del
-disco comparados entre GPU y double. La imagen completa compara ambas rutas con
-la nueva atmósfera, iluminación y transformación de pantalla.
-La comparación de imágenes admite diferencias pequeñas por redondeo y caminos
-divergentes cerca de discontinuidades; no exige igualdad binaria CPU/GPU.
+`--test-cpu` and `--test-gpu` can also run directly. GPU tests require a graphics
+session and create a hidden context. They cover capture, escape, grazing and
+near-critical rays against double precision, translation invariance, CPU
+convergence, materials/textures, cancellation, resizing, reproducibility, sRGB
+presentation, PNG orientation, resource failures, disk thermal behavior,
+gravitational/Doppler factors, solar limb darkening, Earth lighting, and CPU/GPU
+image agreement. Small rounding and discontinuity-related path differences are
+allowed; binary CPU/GPU equality is not required.
 
 ```powershell
 .\build\Release\SchwarzschildRayTracer.exe --benchmark
 ```
 
-El benchmark usa 800×600 y 30 muestras por defecto, calienta los shaders y mide
-por separado cómputo GPU, finalización incluyendo lectura y referencia CPU con
-la misma escena, semilla y parámetros físicos. Guarda `benchmark-gpu.png` y
-`benchmark-cpu.png` en `Output/`; informa RMSE y rayos inválidos. La CPU usa double
-y la GPU float: la aceleración medida incluye esa diferencia de precisión.
-Las mediciones excluyen compilación inicial, carga de recursos y codificación PNG.
+The benchmark defaults to 800x600 and 30 samples, warms shaders, measures GPU
+compute, GPU completion including readback, and the CPU reference under the same
+scene, seed, and physical parameters. It writes `benchmark-gpu.png` and
+`benchmark-cpu.png` to `Output/` and reports RMSE and invalid rays. Measurements
+exclude initial compilation, asset loading, and PNG encoding. Performance depends
+on hardware; AMD and Linux have not yet received local validation for the newest
+lighting path.
 
-Comparación local del 9 de septiembre de 2026, Release, RTX 4070 Laptop GPU,
-con presentación de pasadas completas en ambas versiones:
+Local comparison on September 9, 2026 (Release, RTX 4070 Laptop GPU), with
+complete-pass presentation in both versions:
 
-| 800×600, 30 muestras | Corte a radio 5.5 | Integración en toda la escena |
+| 800x600, 30 samples | 5.5-radius cutoff | Full-scene integration |
 | --- | ---: | ---: |
-| Cómputo GPU | 0.970 s | 2.420 s |
-| Finalización GPU incluyendo lectura | 1.047 s | 2.508 s |
-| Mayor lote GPU | 40.79 ms | 130.54 ms |
-| Rayos inválidos GPU | 0 | 0 |
+| GPU compute | 0.970 s | 2.420 s |
+| GPU completion including readback | 1.047 s | 2.508 s |
+| Largest GPU batch | 40.79 ms | 130.54 ms |
+| Invalid GPU rays | 0 | 0 |
 
-La nueva vista previa de 200×150 y una muestra tardó 54 ms incluyendo lectura,
-con un lote máximo de 16.52 ms. Son tiempos de render sin presentación/VSync,
-no una garantía de latencia interactiva. La comparación CPU/GPU a 30 muestras
-dio RMSE RGB lineal 0.005835 y cero rayos inválidos en ambas rutas. Se verifican
-además independencia respecto al radio antiguo, curvatura exterior y continuidad
-al cruzar 5.5. Las conexiones directas de luz/sombra conservan la aproximación
-rectilínea descrita arriba.
+The new 200x150, one-sample preview took 54 ms including readback, with a
+maximum batch of 16.52 ms. These are render times without presentation/VSync,
+not a guarantee of interactive latency. At 30 samples, the CPU/GPU comparison
+reported linear RGB RMSE 0.005835 and zero invalid rays in both paths.
 
-Medición histórica anterior a la presentación de pasadas completas y prioridad
-de primera muestra, Release con disco, redshift y nueva iluminación, Windows,
-RTX 4070 Laptop GPU (8 de septiembre de 2026):
+An earlier historical measurement, before complete-pass presentation and
+first-sample priority (Release with disk, redshift, and new lighting on an RTX
+4070 Laptop GPU under Windows, September 8, 2026), was:
 
-| Medida, 800×600, 30 muestras | Resultado |
+| Measurement, 800x600, 30 samples | Result |
 | --- | ---: |
-| Cómputo GPU | 0.500 s |
-| GPU incluyendo lectura | 0.536 s |
-| Referencia CPU, todos los núcleos, double | 18.25 s |
-| Aceleración de finalización | 34.1× |
-| Mayor lote GPU | 38.39 ms |
-| RMSE RGB lineal | 0.000953 |
-| Rayos inválidos CPU / GPU | 0 / 0 |
+| GPU compute | 0.500 s |
+| GPU including readback | 0.536 s |
+| CPU reference, all cores, double | 18.25 s |
+| Completion speedup | 34.1x |
+| Largest GPU batch | 38.39 ms |
+| Linear RGB RMSE | 0.000953 |
+| Invalid CPU / GPU rays | 0 / 0 |
 
-La presentación interactiva también depende de VSync y de la planificación del
-sistema, por lo que estos tiempos no equivalen a FPS de la ventana. Se validó
-la nueva iluminación en RTX 4070 Laptop en Windows. El backend anterior también
-se probó en Intel Arc integrado, pero la nueva iluminación no se ha vuelto a
-validar allí. AMD y Linux siguen sin prueba local; la velocidad depende del hardware.
+Interactive presentation also depends on VSync and system scheduling, so these
+times are not equivalent to window FPS. The new lighting was validated on the
+RTX 4070 Laptop GPU under Windows. The earlier backend was also tested on
+integrated Intel Arc graphics, but the new lighting has not been retested there.
